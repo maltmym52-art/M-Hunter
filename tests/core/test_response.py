@@ -182,3 +182,12 @@ def test_empty_cookie_value():
     response.cookies["empty"] = ""
 
     assert response.get_cookie("empty") == ""
+
+
+def test_content_type_normalization():
+    response = create_response(
+        content_type="  Application/JSON ; charset=UTF-8  "
+    )
+
+    assert response.get_content_type() == "application/json"
+    assert response.is_json() is True
