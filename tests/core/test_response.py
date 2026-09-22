@@ -166,3 +166,11 @@ def test_invalid_json():
         pass
     else:
         raise AssertionError("Expected ValueError for invalid JSON")
+
+
+def test_text_decoding_invalid_utf8():
+    response = create_response(
+        content=b"Hello \xff World",
+    )
+
+    assert response.text == "Hello � World"
