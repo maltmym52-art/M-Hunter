@@ -40,6 +40,7 @@ class HttpEngine:
 
             content_length = len(response.content)
             response.extensions["m_hunter_content_length"] = content_length
+            response.extensions["m_hunter_cookies"] = response.cookies
 
             return response
 
