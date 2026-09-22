@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "m-hunter"
+version = "0.1.0"
+description = "Modular Web Security Research Platform"
+requires-python = ">=3.11"
+dependencies = [
+    "rich>=13.0",
+    "typer>=0.12"
+]
+
+[tool.setuptools.packages.find]
+include = ["m_hunter*"]
+
+[project.scripts]
+m-hunter = "m_hunter.main:main"
