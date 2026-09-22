@@ -28,6 +28,13 @@ class HttpResponse:
             ),
             None,
         )
+    def get_content_type(self) -> str | None:
+        content_type = self.get_header("content-type")
+
+        if content_type is None:
+            return None
+
+        return content_type.split(";", 1)[0].strip().lower()
 
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
