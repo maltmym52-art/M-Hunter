@@ -37,6 +37,13 @@ class HttpResponse:
         return content_type.split(";", 1)[0].strip().lower()
     def is_html(self) -> bool:
         return self.get_content_type() == "text/html"
+    def is_json(self) -> bool:
+        content_type = self.get_content_type()
+
+        return content_type in {
+            "application/json",
+            "application/problem+json",
+        }
 
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
