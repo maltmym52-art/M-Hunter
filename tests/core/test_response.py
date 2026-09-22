@@ -191,3 +191,9 @@ def test_content_type_normalization():
 
     assert response.get_content_type() == "application/json"
     assert response.is_json() is True
+
+
+def test_missing_header():
+    response = create_response()
+
+    assert response.get_header("X-Missing-Header") is None
