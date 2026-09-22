@@ -47,3 +47,10 @@ def test_status_category():
     response = create_response(status_code=200)
 
     assert response.status_category == "success"
+
+def test_get_header_case_insensitive():
+    response = create_response()
+
+    assert response.get_header("content-type") == "text/html"
+    assert response.get_header("Content-Type") == "text/html"
+    assert response.get_header("CONTENT-TYPE") == "text/html"
