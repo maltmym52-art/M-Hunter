@@ -13,7 +13,9 @@ def create_response(
             "Content-Type": content_type,
         },
         content=content,
-        cookies={},
+        cookies={
+    "session": "abc123",
+},
         response_time=0.5,
         content_length=len(content),
     )
@@ -54,3 +56,10 @@ def test_get_header_case_insensitive():
     assert response.get_header("content-type") == "text/html"
     assert response.get_header("Content-Type") == "text/html"
     assert response.get_header("CONTENT-TYPE") == "text/html"
+
+
+def test_get_cookie():
+    response = create_response()
+
+    assert response.get_cookie("session") == "abc123"
+    assert response.get_cookie("missing") is None
