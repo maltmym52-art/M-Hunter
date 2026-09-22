@@ -35,6 +35,8 @@ class HttpResponse:
             return None
 
         return content_type.split(";", 1)[0].strip().lower()
+    def is_html(self) -> bool:
+        return self.get_content_type() == "text/html"
 
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
