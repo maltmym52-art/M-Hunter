@@ -38,6 +38,9 @@ class HttpEngine:
             response_time = time.perf_counter() - start_time
             response.extensions["m_hunter_response_time"] = response_time
 
+            content_length = len(response.content)
+            response.extensions["m_hunter_content_length"] = content_length
+
             return response
 
         except httpx.TimeoutException as exc:
