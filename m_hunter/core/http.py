@@ -1,3 +1,5 @@
+import time
+
 import httpx
 
 
@@ -16,12 +18,14 @@ class HttpEngine:
         data=None,
         json=None,
     ) -> httpx.Response:
+        start_time = time.perf_counter()
+
         try:
             with httpx.Client(
                 timeout=self.timeout,
                 follow_redirects=True,
             ) as client:
-                return client.request(
+                response = client.request(
                     method,
                     url,
                     headers=headers,
@@ -31,17 +35,30 @@ class HttpEngine:
                     json=json,
                 )
 
+            response_time = time.perf_counter() - start_time
+            response.extensions["m_hunter_response_time"] = response_time
+
+            return response
+
         except httpx.TimeoutException as exc:
-            raise RuntimeError(f"HTTP request timed out: {url}") from exc
+            raise RuntimeError(
+                f"HTTP request timed out: {url}"
+            ) from exc
 
         except httpx.ConnectError as exc:
-            raise RuntimeError(f"Failed to connect to: {url}") from exc
+            raise RuntimeError(
+                f"Failed to connect to: {url}"
+            ) from exc
 
         except httpx.NetworkError as exc:
-            raise RuntimeError(f"Network error while requesting: {url}") from exc
+            raise RuntimeError(
+                f"Network error while requesting: {url}"
+            ) from exc
 
         except httpx.HTTPError as exc:
-            raise RuntimeError(f"HTTP error while requesting: {url}") from exc
+            raise RuntimeError(
+                f"HTTP error while requesting: {url}"
+            ) from exc
 
     def get(self, url: str, **kwargs) -> httpx.Response:
         return self.request("GET", url, **kwargs)
