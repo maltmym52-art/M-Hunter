@@ -9,13 +9,26 @@ class HttpEngine:
         self,
         method: str,
         url: str,
-        **kwargs,
+        *,
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        data=None,
+        json=None,
     ) -> httpx.Response:
         with httpx.Client(
             timeout=self.timeout,
             follow_redirects=True,
         ) as client:
-            return client.request(method, url, **kwargs)
+            return client.request(
+                method,
+                url,
+                headers=headers,
+                cookies=cookies,
+                params=params,
+                data=data,
+                json=json,
+            )
 
     def get(self, url: str, **kwargs) -> httpx.Response:
         return self.request("GET", url, **kwargs)
