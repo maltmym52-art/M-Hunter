@@ -13,6 +13,8 @@ class HttpResponse:
     content_length: int
 
     @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
     def text(self) -> str:
         return self.content.decode("utf-8", errors="replace")
     def get_headers(self) -> dict[str, str]:
