@@ -13,6 +13,22 @@ class HttpResponse:
     content_length: int
 
     @property
+    def status_category(self) -> str:
+        if self.is_success:
+            return "success"
+
+        if self.is_redirect:
+            return "redirect"
+
+        if self.is_client_error:
+            return "client_error"
+
+        if self.is_server_error:
+            return "server_error"
+
+        return "informational"
+
+    @property
     def is_server_error(self) -> bool:
         return 500 <= self.status_code < 600
 
