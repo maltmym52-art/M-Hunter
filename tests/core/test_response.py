@@ -141,3 +141,14 @@ def test_missing_content_type():
     assert response.is_text() is False
     assert response.is_html() is False
     assert response.is_json() is False
+
+
+def test_status_category_boundaries():
+    assert create_response(status_code=100).status_category == "informational"
+    assert create_response(status_code=299).status_category == "success"
+    assert create_response(status_code=300).status_category == "redirect"
+    assert create_response(status_code=399).status_category == "redirect"
+    assert create_response(status_code=400).status_category == "client_error"
+    assert create_response(status_code=499).status_category == "client_error"
+    assert create_response(status_code=500).status_category == "server_error"
+    assert create_response(status_code=599).status_category == "server_error"
