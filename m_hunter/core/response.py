@@ -14,6 +14,8 @@ class HttpResponse:
     @property
     def text(self) -> str:
         return self.content.decode("utf-8", errors="replace")
+    def get_headers(self) -> dict[str, str]:
+        return self.headers.copy()
 
     def get_header(self, name: str) -> str | None:
         name = name.lower()
