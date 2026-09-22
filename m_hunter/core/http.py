@@ -42,6 +42,7 @@ class HttpEngine:
             response.extensions["m_hunter_content_length"] = content_length
             response.extensions["m_hunter_cookies"] = response.cookies
             response.extensions["m_hunter_final_url"] = str(response.url)
+            response.extensions["m_hunter_headers"] = dict(response.headers)
 
             return response
 
