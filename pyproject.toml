@@ -13,8 +13,8 @@ dependencies = [
     "httpx>=0.27"
 ]
 
-[tool.setuptools.packages.find]
-include = ["m_hunter*"]
-
 [project.scripts]
 m-hunter = "m_hunter.main:main"
+
+[tool.setuptools.packages.find]
+include = ["m_hunter*"]
