@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from m_hunter.config.settings import HttpSettings
@@ -23,19 +24,14 @@ class FakeResponse:
 
 
 class FakeClient:
-    last_instance = None
+    instances = []
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.request_calls = []
+        self.closed = False
 
-        FakeClient.last_instance = self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
+        FakeClient.instances.append(self)
 
     def request(self, method, url, **kwargs):
         self.request_calls.append(
@@ -48,24 +44,20 @@ class FakeClient:
 
         return FakeResponse()
 
+    def close(self):
+        self.closed = True
 
-def create_engine(monkeypatch, **client_kwargs):
-    def fake_client(**kwargs):
-        FakeClient(**kwargs)
 
-        instance = FakeClient.last_instance
+@pytest.fixture(autouse=True)
+def reset_fake_clients():
+    FakeClient.instances.clear()
 
-        for key, value in client_kwargs.items():
-            instance.kwargs[key] = value
 
-        return instance
-
+def patch_client(monkeypatch):
     monkeypatch.setattr(
         "m_hunter.core.http.httpx.Client",
-        fake_client,
+        FakeClient,
     )
-
-    return HttpEngine()
 
 
 def test_http_engine_defaults():
@@ -74,6 +66,9 @@ def test_http_engine_defaults():
     assert engine.timeout == 10.0
     assert engine.follow_redirects is True
     assert engine.user_agent == "M-Hunter/0.1.0"
+    assert engine.is_closed is False
+
+    engine.close()
 
 
 def test_http_engine_accepts_custom_settings():
@@ -90,63 +85,66 @@ def test_http_engine_accepts_custom_settings():
     assert engine.follow_redirects is False
     assert engine.user_agent == "Custom-Agent/1.0"
 
+    engine.close()
 
-def test_http_engine_uses_settings_for_client(monkeypatch):
+
+def test_http_engine_creates_one_client(monkeypatch):
+    patch_client(monkeypatch)
+
+    engine = HttpEngine()
+
+    assert len(FakeClient.instances) == 1
+
+    engine.close()
+
+
+def test_http_engine_client_uses_settings(monkeypatch):
+    patch_client(monkeypatch)
+
     settings = HttpSettings(
         timeout=25.0,
         follow_redirects=False,
         user_agent="Test-Agent/2.0",
     )
 
-    captured = {}
-
-    class Client:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
-
     engine = HttpEngine(settings)
 
-    engine.get("https://example.com")
+    client = FakeClient.instances[0]
 
-    assert captured["timeout"] == 25.0
-    assert captured["follow_redirects"] is False
-    assert captured["headers"] == {
+    assert client.kwargs["timeout"] == 25.0
+    assert client.kwargs["follow_redirects"] is False
+    assert client.kwargs["headers"] == {
         "User-Agent": "Test-Agent/2.0",
     }
 
+    engine.close()
+
+
+def test_http_engine_reuses_client(monkeypatch):
+    patch_client(monkeypatch)
+
+    engine = HttpEngine()
+
+    engine.get("https://example.com/one")
+    engine.get("https://example.com/two")
+
+    assert len(FakeClient.instances) == 1
+
+    client = FakeClient.instances[0]
+
+    assert len(client.request_calls) == 2
+    assert client.request_calls[0]["url"] == (
+        "https://example.com/one"
+    )
+    assert client.request_calls[1]["url"] == (
+        "https://example.com/two"
+    )
+
+    engine.close()
+
 
 def test_http_engine_creates_response(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -160,27 +158,11 @@ def test_http_engine_creates_response(monkeypatch):
     assert response.content_length == 2
     assert response.get_content_type() == "text/plain"
 
+    engine.close()
+
 
 def test_http_engine_passes_request_headers(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            self.request_kwargs = None
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            self.request_kwargs = kwargs
-            test_http_engine_passes_request_headers.request_kwargs = kwargs
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -191,35 +173,17 @@ def test_http_engine_passes_request_headers(monkeypatch):
         },
     )
 
-    assert (
-        test_http_engine_passes_request_headers.request_kwargs[
-            "headers"
-        ]
-        == {
-            "Authorization": "Bearer test",
-        }
-    )
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["kwargs"]["headers"] == {
+        "Authorization": "Bearer test",
+    }
+
+    engine.close()
 
 
 def test_http_engine_passes_cookies(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            test_http_engine_passes_cookies.request_kwargs = kwargs
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -230,35 +194,17 @@ def test_http_engine_passes_cookies(monkeypatch):
         },
     )
 
-    assert (
-        test_http_engine_passes_cookies.request_kwargs[
-            "cookies"
-        ]
-        == {
-            "session": "abc",
-        }
-    )
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["kwargs"]["cookies"] == {
+        "session": "abc",
+    }
+
+    engine.close()
 
 
 def test_http_engine_passes_params(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            test_http_engine_passes_params.request_kwargs = kwargs
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -269,35 +215,17 @@ def test_http_engine_passes_params(monkeypatch):
         },
     )
 
-    assert (
-        test_http_engine_passes_params.request_kwargs[
-            "params"
-        ]
-        == {
-            "page": "1",
-        }
-    )
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["kwargs"]["params"] == {
+        "page": "1",
+    }
+
+    engine.close()
 
 
 def test_http_engine_passes_data(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            test_http_engine_passes_data.request_kwargs = kwargs
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -308,35 +236,17 @@ def test_http_engine_passes_data(monkeypatch):
         },
     )
 
-    assert (
-        test_http_engine_passes_data.request_kwargs[
-            "data"
-        ]
-        == {
-            "username": "test",
-        }
-    )
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["kwargs"]["data"] == {
+        "username": "test",
+    }
+
+    engine.close()
 
 
 def test_http_engine_passes_json(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            test_http_engine_passes_json.request_kwargs = kwargs
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -347,14 +257,13 @@ def test_http_engine_passes_json(monkeypatch):
         },
     )
 
-    assert (
-        test_http_engine_passes_json.request_kwargs[
-            "json"
-        ]
-        == {
-            "username": "test",
-        }
-    )
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["kwargs"]["json"] == {
+        "username": "test",
+    }
+
+    engine.close()
 
 
 @pytest.mark.parametrize(
@@ -370,26 +279,7 @@ def test_http_engine_passes_json(monkeypatch):
     ],
 )
 def test_http_methods(monkeypatch, method):
-    calls = []
-
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method_name, url, **kwargs):
-            calls.append(method_name)
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -397,23 +287,16 @@ def test_http_methods(monkeypatch, method):
         "https://example.com"
     )
 
-    assert calls == [method.upper()]
+    client = FakeClient.instances[0]
+
+    assert client.request_calls[0]["method"] == method.upper()
+
+    engine.close()
 
 
 def test_http_engine_handles_timeout(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
-            import httpx
-
             raise httpx.TimeoutException("timeout")
 
     monkeypatch.setattr(
@@ -429,22 +312,15 @@ def test_http_engine_handles_timeout(monkeypatch):
     ):
         engine.get("https://example.com")
 
+    engine.close()
+
 
 def test_http_engine_handles_connect_error(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
-            import httpx
-
-            raise httpx.ConnectError("connection failed")
+            raise httpx.ConnectError(
+                "connection failed"
+            )
 
     monkeypatch.setattr(
         "m_hunter.core.http.httpx.Client",
@@ -459,22 +335,15 @@ def test_http_engine_handles_connect_error(monkeypatch):
     ):
         engine.get("https://example.com")
 
+    engine.close()
+
 
 def test_http_engine_handles_network_error(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
-            import httpx
-
-            raise httpx.NetworkError("network failed")
+            raise httpx.NetworkError(
+                "network failed"
+            )
 
     monkeypatch.setattr(
         "m_hunter.core.http.httpx.Client",
@@ -489,22 +358,15 @@ def test_http_engine_handles_network_error(monkeypatch):
     ):
         engine.get("https://example.com")
 
+    engine.close()
+
 
 def test_http_engine_handles_http_error(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
-            import httpx
-
-            raise httpx.HTTPError("http failed")
+            raise httpx.HTTPError(
+                "http failed"
+            )
 
     monkeypatch.setattr(
         "m_hunter.core.http.httpx.Client",
@@ -519,25 +381,11 @@ def test_http_engine_handles_http_error(monkeypatch):
     ):
         engine.get("https://example.com")
 
+    engine.close()
+
 
 def test_http_engine_response_timing(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
-        def request(self, method, url, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(
-        "m_hunter.core.http.httpx.Client",
-        Client,
-    )
+    patch_client(monkeypatch)
 
     engine = HttpEngine()
 
@@ -547,18 +395,11 @@ def test_http_engine_response_timing(monkeypatch):
 
     assert response.response_time >= 0
 
+    engine.close()
+
 
 def test_http_engine_response_headers(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
             return FakeResponse(
                 headers={
@@ -581,18 +422,11 @@ def test_http_engine_response_headers(monkeypatch):
     assert response.get_header("x-test") == "true"
     assert response.get_content_type() == "application/json"
 
+    engine.close()
+
 
 def test_http_engine_response_cookies(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
             return FakeResponse(
                 cookies={
@@ -613,18 +447,11 @@ def test_http_engine_response_cookies(monkeypatch):
 
     assert response.get_cookie("session") == "abc"
 
+    engine.close()
+
 
 def test_http_engine_redirect_response(monkeypatch):
-    class Client:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
+    class Client(FakeClient):
         def request(self, method, url, **kwargs):
             return FakeResponse(
                 status_code=302,
@@ -644,3 +471,72 @@ def test_http_engine_redirect_response(monkeypatch):
 
     assert response.status_code == 302
     assert response.is_redirect
+
+    engine.close()
+
+
+def test_http_engine_close_closes_client(monkeypatch):
+    patch_client(monkeypatch)
+
+    engine = HttpEngine()
+
+    client = FakeClient.instances[0]
+
+    assert client.closed is False
+    assert engine.is_closed is False
+
+    engine.close()
+
+    assert client.closed is True
+    assert engine.is_closed is True
+
+
+def test_http_engine_close_is_idempotent(monkeypatch):
+    patch_client(monkeypatch)
+
+    engine = HttpEngine()
+
+    client = FakeClient.instances[0]
+
+    engine.close()
+    engine.close()
+
+    assert client.closed is True
+    assert engine.is_closed is True
+
+
+def test_http_engine_rejects_request_after_close(monkeypatch):
+    patch_client(monkeypatch)
+
+    engine = HttpEngine()
+
+    engine.close()
+
+    with pytest.raises(
+        RuntimeError,
+        match="HttpEngine is closed",
+    ):
+        engine.get("https://example.com")
+
+
+def test_http_engine_context_manager(monkeypatch):
+    patch_client(monkeypatch)
+
+    with HttpEngine() as engine:
+        assert engine.is_closed is False
+
+    assert engine.is_closed is True
+    assert FakeClient.instances[0].closed is True
+
+
+def test_http_engine_context_manager_closes_after_exception(
+    monkeypatch,
+):
+    patch_client(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        with HttpEngine() as engine:
+            raise RuntimeError("test error")
+
+    assert engine.is_closed is True
+    assert FakeClient.instances[0].closed is True

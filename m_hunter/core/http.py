@@ -17,6 +17,16 @@ class HttpEngine:
         self.follow_redirects = self.settings.follow_redirects
         self.user_agent = self.settings.user_agent
 
+        self._client = httpx.Client(
+            timeout=self.timeout,
+            follow_redirects=self.follow_redirects,
+            headers={
+                "User-Agent": self.user_agent,
+            },
+        )
+
+        self._closed = False
+
     def request(
         self,
         method: str,
@@ -28,25 +38,21 @@ class HttpEngine:
         data=None,
         json=None,
     ) -> HttpResponse:
+        if self._closed:
+            raise RuntimeError("HttpEngine is closed")
+
         start_time = time.perf_counter()
 
         try:
-            with httpx.Client(
-                timeout=self.timeout,
-                follow_redirects=self.follow_redirects,
-                headers={
-                    "User-Agent": self.user_agent,
-                },
-            ) as client:
-                response = client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    cookies=cookies,
-                    params=params,
-                    data=data,
-                    json=json,
-                )
+            response = self._client.request(
+                method,
+                url,
+                headers=headers,
+                cookies=cookies,
+                params=params,
+                data=data,
+                json=json,
+            )
 
             response_time = time.perf_counter() - start_time
             content = response.content
@@ -80,6 +86,24 @@ class HttpEngine:
             raise RuntimeError(
                 f"HTTP error while requesting: {url}"
             ) from exc
+
+    def close(self) -> None:
+        if self._closed:
+            return
+
+        self._client.close()
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
 
     def get(self, url: str, **kwargs) -> HttpResponse:
         return self.request("GET", url, **kwargs)
