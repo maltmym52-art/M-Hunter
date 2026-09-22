@@ -87,3 +87,17 @@ def test_json_response():
         "status": "ok",
         "count": 5,
     }
+
+
+def test_json_rejects_non_json():
+    response = create_response(
+        content_type="text/html",
+        content=b"<html>Hello</html>",
+    )
+
+    try:
+        response.json()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError for non-JSON response")
