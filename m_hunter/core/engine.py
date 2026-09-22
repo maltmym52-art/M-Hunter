@@ -2,12 +2,24 @@ from m_hunter.core.finding import Finding
 from m_hunter.core.scan import Scan
 from m_hunter.core.target import Target
 from m_hunter.scanners.base import BaseScanner
+from m_hunter.scanners.discovery import ScannerDiscovery
 from m_hunter.scanners.registry import ScannerRegistry
 
 
 class ScanEngine:
-    def __init__(self, registry: ScannerRegistry | None = None):
-        self.registry = registry or ScannerRegistry()
+    def __init__(
+        self,
+        registry: ScannerRegistry | None = None,
+        *,
+        auto_discover: bool = True,
+    ):
+        if registry is None:
+            registry = ScannerRegistry()
+
+            if auto_discover:
+                ScannerDiscovery().register_all(registry)
+
+        self.registry = registry
 
     def create_scan(self, target_url: str) -> Scan:
         target = Target(target_url)

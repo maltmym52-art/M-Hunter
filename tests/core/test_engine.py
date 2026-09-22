@@ -48,7 +48,7 @@ def create_finding(title="Test Finding"):
 
 
 def test_create_scan():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scan = engine.create_scan("https://example.com")
 
@@ -58,7 +58,7 @@ def test_create_scan():
 
 
 def test_start_scan():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scan = engine.start_scan("https://example.com")
 
@@ -68,7 +68,7 @@ def test_start_scan():
 
 
 def test_run_scanners():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     finding = create_finding()
     scanner = ScannerStub([finding])
@@ -82,7 +82,7 @@ def test_run_scanners():
 
 
 def test_run_multiple_scanners():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     finding_one = create_finding("Finding One")
     finding_two = create_finding("Finding Two")
@@ -103,7 +103,7 @@ def test_run_multiple_scanners():
 
 
 def test_run_scanner_with_no_findings():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scanner = EmptyScanner()
     scan = engine.create_scan("https://example.com")
@@ -114,7 +114,7 @@ def test_run_scanner_with_no_findings():
 
 
 def test_run_scanners_with_empty_list():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scan = engine.create_scan("https://example.com")
 
@@ -124,7 +124,7 @@ def test_run_scanners_with_empty_list():
 
 
 def test_finish_scan():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scan = engine.start_scan("https://example.com")
 
@@ -135,7 +135,7 @@ def test_finish_scan():
 
 
 def test_full_scan_lifecycle():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     finding = create_finding()
     scanner = ScannerStub([finding])
@@ -157,7 +157,7 @@ def test_full_scan_lifecycle():
 
 
 def test_engine_creates_default_registry():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     assert isinstance(engine.registry, ScannerRegistry)
     assert engine.registry.count() == 0
@@ -228,7 +228,7 @@ def test_registered_scanners_with_no_findings():
 
 
 def test_run_registered_scanners_with_empty_registry():
-    engine = ScanEngine()
+    engine = ScanEngine(auto_discover=False)
 
     scan = engine.create_scan("https://example.com")
 
@@ -254,4 +254,41 @@ def test_registered_scanners_use_scan_target():
     assert scanner.received_target is scan.target
     assert scanner.received_target.url == (
         "https://example.com/login"
+    )
+
+
+def test_engine_auto_discovers_scanners():
+    engine = ScanEngine()
+
+    assert engine.registry.count() >= 2
+    assert "example" in engine.registry.names()
+    assert "security_headers" in engine.registry.names()
+
+
+def test_engine_auto_discovery_can_be_disabled():
+    engine = ScanEngine(auto_discover=False)
+
+    assert engine.registry.count() == 0
+
+
+def test_custom_registry_is_not_auto_discovered():
+    registry = ScannerRegistry()
+
+    engine = ScanEngine(registry)
+
+    assert engine.registry is registry
+    assert engine.registry.count() == 0
+
+
+def test_auto_discovered_scanners_can_run():
+    engine = ScanEngine()
+
+    scan = engine.create_scan("https://example.com")
+
+    findings = engine.run_registered_scanners(scan)
+
+    assert findings
+    assert any(
+        finding.target == "https://example.com"
+        for finding in findings
     )
