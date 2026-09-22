@@ -14,3 +14,12 @@ class HttpResponse:
     @property
     def text(self) -> str:
         return self.content.decode("utf-8", errors="replace")
+
+    def get_header(self, name: str) -> str | None:
+        name = name.lower()
+
+        for header_name, value in self.headers.items():
+            if header_name.lower() == name:
+                return value
+
+        return None
