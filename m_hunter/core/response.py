@@ -13,10 +13,17 @@ class HttpResponse:
     content_length: int
 
     @property
-    def is_success(self) -> bool:
-        return 200 <= self.status_code < 300
     def text(self) -> str:
         return self.content.decode("utf-8", errors="replace")
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    @property
+    def is_redirect(self) -> bool:
+        return 300 <= self.status_code < 400
+
     def get_headers(self) -> dict[str, str]:
         return self.headers.copy()
 
@@ -31,6 +38,10 @@ class HttpResponse:
             ),
             None,
         )
+
+    def get_cookie(self, name: str) -> str | None:
+        return self.cookies.get(name)
+
     def get_content_type(self) -> str | None:
         content_type = self.get_header("content-type")
 
@@ -38,6 +49,7 @@ class HttpResponse:
             return None
 
         return content_type.split(";", 1)[0].strip().lower()
+
     def is_html(self) -> bool:
         return self.get_content_type() == "text/html"
 
@@ -48,6 +60,12 @@ class HttpResponse:
             "application/json",
             "application/problem+json",
         }
+
+    def json(self):
+        if not self.is_json():
+            raise ValueError("Response content type is not JSON")
+
+        return json.loads(self.text)
 
     def is_text(self) -> bool:
         content_type = self.get_content_type()
@@ -64,13 +82,3 @@ class HttpResponse:
                 "application/xhtml+xml",
             }
         )
-
-    def json(self):
-        if not self.is_json():
-            raise ValueError("Response content type is not JSON")
-
-        return json.loads(self.text)
-
-
-    def get_cookie(self, name: str) -> str | None:
-        return self.cookies.get(name)
