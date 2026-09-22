@@ -2,12 +2,20 @@ import time
 
 import httpx
 
+from m_hunter.config.settings import HttpSettings
 from m_hunter.core.response import HttpResponse
 
 
 class HttpEngine:
-    def __init__(self, timeout: float = 10.0):
-        self.timeout = timeout
+    def __init__(
+        self,
+        settings: HttpSettings | None = None,
+    ):
+        self.settings = settings or HttpSettings()
+
+        self.timeout = self.settings.timeout
+        self.follow_redirects = self.settings.follow_redirects
+        self.user_agent = self.settings.user_agent
 
     def request(
         self,
@@ -25,7 +33,10 @@ class HttpEngine:
         try:
             with httpx.Client(
                 timeout=self.timeout,
-                follow_redirects=True,
+                follow_redirects=self.follow_redirects,
+                headers={
+                    "User-Agent": self.user_agent,
+                },
             ) as client:
                 response = client.request(
                     method,
