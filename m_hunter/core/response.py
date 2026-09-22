@@ -13,6 +13,10 @@ class HttpResponse:
     content_length: int
 
     @property
+    def is_server_error(self) -> bool:
+        return 500 <= self.status_code < 600
+
+    @property
     def is_client_error(self) -> bool:
         return 400 <= self.status_code < 500
 
