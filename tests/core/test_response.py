@@ -63,3 +63,14 @@ def test_get_cookie():
 
     assert response.get_cookie("session") == "abc123"
     assert response.get_cookie("missing") is None
+
+
+def test_content_type_and_html():
+    response = create_response(
+        content_type="text/html; charset=utf-8"
+    )
+
+    assert response.get_content_type() == "text/html"
+    assert response.is_html() is True
+    assert response.is_text() is True
+    assert response.is_json() is False
