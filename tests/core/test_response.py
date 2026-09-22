@@ -115,3 +115,18 @@ def test_get_headers_returns_copy():
     headers["X-Test"] = "value"
 
     assert response.get_header("X-Test") is None
+
+
+def test_is_text_for_text_types():
+    text_types = [
+        "text/plain",
+        "text/css",
+        "application/javascript",
+        "application/xml",
+        "application/xhtml+xml",
+    ]
+
+    for content_type in text_types:
+        response = create_response(content_type=content_type)
+
+        assert response.is_text() is True
