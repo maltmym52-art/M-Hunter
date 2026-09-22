@@ -197,3 +197,11 @@ def test_missing_header():
     response = create_response()
 
     assert response.get_header("X-Missing-Header") is None
+
+
+def test_is_html_false_for_non_html():
+    response = create_response(
+        content_type="application/json"
+    )
+
+    assert response.is_html() is False
