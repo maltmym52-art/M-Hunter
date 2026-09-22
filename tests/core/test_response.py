@@ -152,3 +152,17 @@ def test_status_category_boundaries():
     assert create_response(status_code=499).status_category == "client_error"
     assert create_response(status_code=500).status_category == "server_error"
     assert create_response(status_code=599).status_category == "server_error"
+
+
+def test_invalid_json():
+    response = create_response(
+        content_type="application/json",
+        content=b'{"status": invalid}',
+    )
+
+    try:
+        response.json()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError for invalid JSON")
