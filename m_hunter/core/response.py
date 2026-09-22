@@ -47,6 +47,22 @@ class HttpResponse:
             "application/problem+json",
         }
 
+    def is_text(self) -> bool:
+        content_type = self.get_content_type()
+
+        if content_type is None:
+            return False
+
+        return (
+            content_type.startswith("text/")
+            or content_type in {
+                "application/json",
+                "application/javascript",
+                "application/xml",
+                "application/xhtml+xml",
+            }
+        )
+
     def json(self):
         if not self.is_json():
             raise ValueError("Response content type is not JSON")
