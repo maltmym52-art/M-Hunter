@@ -101,3 +101,17 @@ def test_json_rejects_non_json():
         pass
     else:
         raise AssertionError("Expected ValueError for non-JSON response")
+
+
+def test_get_headers_returns_copy():
+    response = create_response()
+
+    headers = response.get_headers()
+
+    assert headers == {
+        "Content-Type": "text/html",
+    }
+
+    headers["X-Test"] = "value"
+
+    assert response.get_header("X-Test") is None
