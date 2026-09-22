@@ -2,6 +2,8 @@ import time
 
 import httpx
 
+from m_hunter.core.response import HttpResponse
+
 
 class HttpEngine:
     def __init__(self, timeout: float = 10.0):
@@ -17,7 +19,7 @@ class HttpEngine:
         params: dict[str, str] | None = None,
         data=None,
         json=None,
-    ) -> httpx.Response:
+    ) -> HttpResponse:
         start_time = time.perf_counter()
 
         try:
@@ -36,15 +38,17 @@ class HttpEngine:
                 )
 
             response_time = time.perf_counter() - start_time
-            response.extensions["m_hunter_response_time"] = response_time
+            content = response.content
 
-            content_length = len(response.content)
-            response.extensions["m_hunter_content_length"] = content_length
-            response.extensions["m_hunter_cookies"] = response.cookies
-            response.extensions["m_hunter_final_url"] = str(response.url)
-            response.extensions["m_hunter_headers"] = dict(response.headers)
-
-            return response
+            return HttpResponse(
+                status_code=response.status_code,
+                url=str(response.url),
+                headers=dict(response.headers),
+                content=content,
+                cookies=dict(response.cookies),
+                response_time=response_time,
+                content_length=len(content),
+            )
 
         except httpx.TimeoutException as exc:
             raise RuntimeError(
@@ -66,23 +70,23 @@ class HttpEngine:
                 f"HTTP error while requesting: {url}"
             ) from exc
 
-    def get(self, url: str, **kwargs) -> httpx.Response:
+    def get(self, url: str, **kwargs) -> HttpResponse:
         return self.request("GET", url, **kwargs)
 
-    def post(self, url: str, **kwargs) -> httpx.Response:
+    def post(self, url: str, **kwargs) -> HttpResponse:
         return self.request("POST", url, **kwargs)
 
-    def put(self, url: str, **kwargs) -> httpx.Response:
+    def put(self, url: str, **kwargs) -> HttpResponse:
         return self.request("PUT", url, **kwargs)
 
-    def patch(self, url: str, **kwargs) -> httpx.Response:
+    def patch(self, url: str, **kwargs) -> HttpResponse:
         return self.request("PATCH", url, **kwargs)
 
-    def delete(self, url: str, **kwargs) -> httpx.Response:
+    def delete(self, url: str, **kwargs) -> HttpResponse:
         return self.request("DELETE", url, **kwargs)
 
-    def head(self, url: str, **kwargs) -> httpx.Response:
+    def head(self, url: str, **kwargs) -> HttpResponse:
         return self.request("HEAD", url, **kwargs)
 
-    def options(self, url: str, **kwargs) -> httpx.Response:
+    def options(self, url: str, **kwargs) -> HttpResponse:
         return self.request("OPTIONS", url, **kwargs)
