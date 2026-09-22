@@ -13,6 +13,10 @@ class HttpResponse:
     content_length: int
 
     @property
+    def is_client_error(self) -> bool:
+        return 400 <= self.status_code < 500
+
+    @property
     def text(self) -> str:
         return self.content.decode("utf-8", errors="replace")
 
