@@ -2,9 +2,13 @@ from m_hunter.core.finding import Finding
 from m_hunter.core.scan import Scan
 from m_hunter.core.target import Target
 from m_hunter.scanners.base import BaseScanner
+from m_hunter.scanners.registry import ScannerRegistry
 
 
 class ScanEngine:
+    def __init__(self, registry: ScannerRegistry | None = None):
+        self.registry = registry or ScannerRegistry()
+
     def create_scan(self, target_url: str) -> Scan:
         target = Target(target_url)
         return Scan(target)
@@ -26,6 +30,12 @@ class ScanEngine:
             findings.extend(scanner_findings)
 
         return findings
+
+    def run_registered_scanners(self, scan: Scan) -> list[Finding]:
+        return self.run_scanners(
+            scan,
+            self.registry.get_all(),
+        )
 
     def finish_scan(self, scan: Scan) -> None:
         scan.finish()
