@@ -174,3 +174,11 @@ def test_text_decoding_invalid_utf8():
     )
 
     assert response.text == "Hello � World"
+
+
+def test_empty_cookie_value():
+    response = create_response()
+
+    response.cookies["empty"] = ""
+
+    assert response.get_cookie("empty") == ""
