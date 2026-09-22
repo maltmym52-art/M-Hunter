@@ -130,3 +130,14 @@ def test_is_text_for_text_types():
         response = create_response(content_type=content_type)
 
         assert response.is_text() is True
+
+
+def test_missing_content_type():
+    response = create_response()
+
+    response.headers.clear()
+
+    assert response.get_content_type() is None
+    assert response.is_text() is False
+    assert response.is_html() is False
+    assert response.is_json() is False
