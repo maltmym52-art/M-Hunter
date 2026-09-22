@@ -74,3 +74,16 @@ def test_content_type_and_html():
     assert response.is_html() is True
     assert response.is_text() is True
     assert response.is_json() is False
+
+
+def test_json_response():
+    response = create_response(
+        content_type="application/json",
+        content=b'{"status": "ok", "count": 5}',
+    )
+
+    assert response.is_json() is True
+    assert response.json() == {
+        "status": "ok",
+        "count": 5,
+    }
