@@ -205,3 +205,12 @@ def test_is_html_false_for_non_html():
     )
 
     assert response.is_html() is False
+
+
+def test_binary_content_is_not_text():
+    response = create_response(
+        content_type="application/octet-stream",
+        content=b"\x00\x01\x02\x03",
+    )
+
+    assert response.is_text() is False
