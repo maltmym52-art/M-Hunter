@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 
@@ -37,6 +38,7 @@ class HttpResponse:
         return content_type.split(";", 1)[0].strip().lower()
     def is_html(self) -> bool:
         return self.get_content_type() == "text/html"
+
     def is_json(self) -> bool:
         content_type = self.get_content_type()
 
@@ -44,6 +46,13 @@ class HttpResponse:
             "application/json",
             "application/problem+json",
         }
+
+    def json(self):
+        if not self.is_json():
+            raise ValueError("Response content type is not JSON")
+
+        return json.loads(self.text)
+
 
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
