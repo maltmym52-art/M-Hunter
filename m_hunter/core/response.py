@@ -18,11 +18,14 @@ class HttpResponse:
     def get_header(self, name: str) -> str | None:
         name = name.lower()
 
+        return next(
+            (
+                value
+                for header_name, value in self.headers.items()
+                if header_name.lower() == name
+            ),
+            None,
+        )
+
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
-
-        for header_name, value in self.headers.items():
-            if header_name.lower() == name:
-                return value
-
-        return None
