@@ -3,6 +3,7 @@ import time
 import httpx
 
 from m_hunter.config.settings import HttpSettings
+from m_hunter.core.request import HttpRequest
 from m_hunter.core.response import HttpResponse
 
 
@@ -27,7 +28,7 @@ class HttpEngine:
 
         self._closed = False
 
-    def request(
+    def _send(
         self,
         method: str,
         url: str,
@@ -41,17 +42,41 @@ class HttpEngine:
         if self._closed:
             raise RuntimeError("HttpEngine is closed")
 
+        request_headers = dict(headers or {})
+
+        if cookies:
+            cookie_jar = httpx.Cookies(cookies)
+
+            request = httpx.Request(
+                method,
+                url,
+                headers=request_headers,
+            )
+
+            cookie_jar.set_cookie_header(request)
+
+            request_headers = dict(request.headers)
+
+        request_kwargs = {
+            "headers": request_headers,
+            "params": params,
+        }
+
+        if json is not None:
+            request_kwargs["json"] = json
+        elif data is not None:
+            if isinstance(data, (str, bytes, bytearray)):
+                request_kwargs["content"] = data
+            else:
+                request_kwargs["data"] = data
+
         start_time = time.perf_counter()
 
         try:
             response = self._client.request(
                 method,
                 url,
-                headers=headers,
-                cookies=cookies,
-                params=params,
-                data=data,
-                json=json,
+                **request_kwargs,
             )
 
             response_time = time.perf_counter() - start_time
@@ -86,6 +111,40 @@ class HttpEngine:
             raise RuntimeError(
                 f"HTTP error while requesting: {url}"
             ) from exc
+
+    def send(self, request: HttpRequest) -> HttpResponse:
+        if not isinstance(request, HttpRequest):
+            raise TypeError("request must be an instance of HttpRequest")
+
+        return self._send(
+            request.method,
+            request.url,
+            headers=request.headers,
+            cookies=request.cookies,
+            params=request.params,
+            data=request.body,
+        )
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        data=None,
+        json=None,
+    ) -> HttpResponse:
+        return self._send(
+            method,
+            url,
+            headers=headers,
+            cookies=cookies,
+            params=params,
+            data=data,
+            json=json,
+        )
 
     def close(self) -> None:
         if self._closed:

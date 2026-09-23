@@ -196,11 +196,9 @@ def test_http_engine_passes_cookies(monkeypatch):
 
     client = FakeClient.instances[0]
 
-    assert client.request_calls[0]["kwargs"]["cookies"] == {
-        "session": "abc",
-    }
+    headers = client.request_calls[0]["kwargs"]["headers"]
 
-    engine.close()
+    assert "session=abc" in headers["cookie"]
 
 
 def test_http_engine_passes_params(monkeypatch):
