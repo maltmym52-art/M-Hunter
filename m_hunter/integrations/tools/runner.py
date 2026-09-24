@@ -90,7 +90,7 @@ class ToolRunner:
 
         def read_stream(stream, chunks):
             while True:
-                data = stream.read(4096)
+                data = stream.read1(4096)
                 if not data:
                     break
                 chunks.append(data)
