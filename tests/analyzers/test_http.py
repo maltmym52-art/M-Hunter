@@ -464,3 +464,51 @@ def test_set_cookie_header_is_case_insensitive():
     assert len(
         analysis.parsed_set_cookies()
     ) == 1
+
+
+def test_multiple_set_cookie_headers_are_preserved():
+    request = HttpRequest(
+        method="GET",
+        url="https://example.com",
+    )
+
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "content-type": "text/html",
+            "set-cookie": "session=abc123; Secure; HttpOnly; SameSite=Lax",
+        },
+        repeated_headers={
+            "set-cookie": [
+                "csrf=token123; Secure; SameSite=Strict",
+                "prefs=dark; Path=/",
+            ],
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    analysis = HTTPAnalyzer().analyze(
+        request,
+        response,
+    )
+
+    headers = analysis.set_cookie_headers()
+
+    assert headers == [
+        "session=abc123; Secure; HttpOnly; SameSite=Lax",
+        "csrf=token123; Secure; SameSite=Strict",
+        "prefs=dark; Path=/",
+    ]
+
+    cookies = analysis.parsed_set_cookies()
+
+    assert len(cookies) == 3
+    assert [cookie.name for cookie in cookies] == [
+        "session",
+        "csrf",
+        "prefs",
+    ]

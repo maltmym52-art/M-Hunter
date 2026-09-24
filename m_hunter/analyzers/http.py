@@ -170,11 +170,7 @@ class HTTPAnalysis:
         }
 
     def set_cookie_headers(self) -> list[str]:
-        return [
-            header.value
-            for header in self.response_headers
-            if header.normalized_name == "set-cookie"
-        ]
+        return self.response.get_headers_all("Set-Cookie")
 
     def parsed_set_cookies(self) -> list[SetCookie]:
         parser = SetCookieParser()
