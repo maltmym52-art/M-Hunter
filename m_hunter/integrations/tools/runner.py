@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import shutil
 import subprocess
+import threading
 import time
 
 
@@ -84,59 +85,80 @@ class ToolRunner:
             shell=False,
         )
 
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        def read_stream(stream, chunks):
+            while True:
+                data = stream.read(4096)
+                if not data:
+                    break
+                chunks.append(data)
+
+        stdout_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stdout, stdout_chunks),
+            daemon=True,
+        )
+
+        stderr_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stderr, stderr_chunks),
+            daemon=True,
+        )
+
+        stdout_thread.start()
+        stderr_thread.start()
+
         try:
-            stdout, stderr = process.communicate(
+            process.wait(
                 timeout=resolved_timeout
             )
+
+            stdout_thread.join()
+            stderr_thread.join()
 
             duration = time.perf_counter() - start
 
             return ToolResult(
                 command=normalized_command,
                 return_code=process.returncode,
-                stdout=stdout.decode(
+                stdout=b"".join(
+                    stdout_chunks
+                ).decode(
                     "utf-8",
                     errors="replace",
                 ),
-                stderr=stderr.decode(
+                stderr=b"".join(
+                    stderr_chunks
+                ).decode(
                     "utf-8",
                     errors="replace",
                 ),
                 duration=duration,
             )
 
-        except subprocess.TimeoutExpired as exc:
-            partial_stdout = exc.stdout or b""
-            partial_stderr = exc.stderr or b""
-
+        except subprocess.TimeoutExpired:
             process.kill()
+            process.wait()
 
-            remaining_stdout, remaining_stderr = (
-                process.communicate()
-            )
-
-            if remaining_stdout:
-                partial_stdout += remaining_stdout
-
-            if remaining_stderr:
-                partial_stderr += remaining_stderr
+            stdout_thread.join()
+            stderr_thread.join()
 
             duration = time.perf_counter() - start
-
-            if isinstance(partial_stdout, str):
-                partial_stdout = partial_stdout.encode()
-
-            if isinstance(partial_stderr, str):
-                partial_stderr = partial_stderr.encode()
 
             return ToolResult(
                 command=normalized_command,
                 return_code=None,
-                stdout=partial_stdout.decode(
+                stdout=b"".join(
+                    stdout_chunks
+                ).decode(
                     "utf-8",
                     errors="replace",
                 ),
-                stderr=partial_stderr.decode(
+                stderr=b"".join(
+                    stderr_chunks
+                ).decode(
                     "utf-8",
                     errors="replace",
                 ),
