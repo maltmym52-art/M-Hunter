@@ -13,6 +13,13 @@ class CORSHeaders:
     max_age: str | None = None
 
 
+@dataclass(frozen=True)
+class CORSIssue:
+    issue: str
+    severity: str
+    description: str
+
+
 @dataclass
 class CORSAnalysis:
     headers: CORSHeaders
@@ -26,16 +33,13 @@ class CORSAnalysis:
     allowed_headers: tuple[str, ...] = field(
         default_factory=tuple
     )
+    issues: list[CORSIssue] = field(
+        default_factory=list
+    )
 
     @property
     def potentially_sensitive(self) -> bool:
-        return (
-            self.origin_with_credentials
-            or (
-                self.wildcard_origin
-                and self.credentials_enabled
-            )
-        )
+        return bool(self.issues)
 
 
 class CORSAnalyzer:
@@ -104,6 +108,13 @@ class CORSAnalyzer:
             cors_headers.allow_headers
         )
 
+        issues = self._analyze_issues(
+            cors_headers=cors_headers,
+            wildcard_origin=wildcard_origin,
+            credentials_enabled=credentials_enabled,
+            origin_with_credentials=origin_with_credentials,
+        )
+
         return CORSAnalysis(
             headers=cors_headers,
             enabled=bool(headers),
@@ -112,7 +123,96 @@ class CORSAnalyzer:
             origin_with_credentials=origin_with_credentials,
             allowed_methods=allowed_methods,
             allowed_headers=allowed_headers,
+            issues=issues,
         )
+
+    @staticmethod
+    def _analyze_issues(
+        cors_headers: CORSHeaders,
+        wildcard_origin: bool,
+        credentials_enabled: bool,
+        origin_with_credentials: bool,
+    ) -> list[CORSIssue]:
+        issues: list[CORSIssue] = []
+
+        if wildcard_origin and credentials_enabled:
+            issues.append(
+                CORSIssue(
+                    issue="wildcard_origin_with_credentials",
+                    severity="high",
+                    description=(
+                        "CORS allows a wildcard origin while "
+                        "credentials are enabled."
+                    ),
+                )
+            )
+
+        if origin_with_credentials:
+            issues.append(
+                CORSIssue(
+                    issue="origin_with_credentials",
+                    severity="medium",
+                    description=(
+                        "CORS allows credentials for a specific "
+                        "origin. The origin should be validated "
+                        "against an explicit allowlist."
+                    ),
+                )
+            )
+
+        if (
+            cors_headers.allow_origin is not None
+            and not wildcard_origin
+            and cors_headers.allow_origin.strip()
+            == "null"
+        ):
+            issues.append(
+                CORSIssue(
+                    issue="null_origin_allowed",
+                    severity="medium",
+                    description=(
+                        "CORS explicitly allows the null origin."
+                    ),
+                )
+            )
+
+        if (
+            cors_headers.allow_methods is not None
+            and "*" in (
+                method.strip()
+                for method in cors_headers.allow_methods.split(",")
+            )
+        ):
+            issues.append(
+                CORSIssue(
+                    issue="wildcard_methods",
+                    severity="low",
+                    description=(
+                        "CORS allows all methods through a "
+                        "wildcard method value."
+                    ),
+                )
+            )
+
+        if (
+            cors_headers.allow_headers is not None
+            and "*" in (
+                header.strip()
+                for header in cors_headers.allow_headers.split(",")
+            )
+        ):
+            issues.append(
+                CORSIssue(
+                    issue="wildcard_headers",
+                    severity="low",
+                    description=(
+                        "CORS allows all request headers through "
+                        "a wildcard header value."
+                    ),
+                )
+            )
+
+        return issues
 
     @staticmethod
     def _split_values(

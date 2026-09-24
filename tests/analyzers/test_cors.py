@@ -4,6 +4,7 @@ from m_hunter.analyzers.cors import (
     CORSAnalysis,
     CORSAnalyzer,
     CORSHeaders,
+    CORSIssue,
 )
 from m_hunter.analyzers.http import HTTPAnalyzer
 from m_hunter.core.request import HttpRequest
@@ -44,6 +45,8 @@ def test_empty_cors_analysis():
     assert result.origin_with_credentials is False
     assert result.allowed_methods == ()
     assert result.allowed_headers == ()
+    assert result.issues == []
+    assert result.potentially_sensitive is False
 
 
 def test_requires_http_analysis():
@@ -94,17 +97,7 @@ def test_detects_wildcard_origin():
 
     assert result.enabled is True
     assert result.wildcard_origin is True
-
-
-def test_wildcard_is_not_automatically_sensitive():
-    result = CORSAnalyzer().analyze(
-        make_analysis(
-            {
-                "Access-Control-Allow-Origin": "*",
-            }
-        )
-    )
-
+    assert result.issues == []
     assert result.potentially_sensitive is False
 
 
@@ -149,8 +142,20 @@ def test_origin_with_credentials():
     assert result.origin_with_credentials is True
     assert result.potentially_sensitive is True
 
+    assert result.issues == [
+        CORSIssue(
+            issue="origin_with_credentials",
+            severity="medium",
+            description=(
+                "CORS allows credentials for a specific "
+                "origin. The origin should be validated "
+                "against an explicit allowlist."
+            ),
+        )
+    ]
 
-def test_wildcard_with_credentials_is_not_origin_with_credentials():
+
+def test_wildcard_with_credentials_is_detected():
     result = CORSAnalyzer().analyze(
         make_analysis(
             {
@@ -164,6 +169,38 @@ def test_wildcard_with_credentials_is_not_origin_with_credentials():
     assert result.wildcard_origin is True
     assert result.credentials_enabled is True
     assert result.origin_with_credentials is False
+    assert result.potentially_sensitive is True
+
+    assert result.issues == [
+        CORSIssue(
+            issue="wildcard_origin_with_credentials",
+            severity="high",
+            description=(
+                "CORS allows a wildcard origin while "
+                "credentials are enabled."
+            ),
+        )
+    ]
+
+
+def test_null_origin_is_detected():
+    result = CORSAnalyzer().analyze(
+        make_analysis(
+            {
+                "Access-Control-Allow-Origin": "null",
+            }
+        )
+    )
+
+    assert result.issues == [
+        CORSIssue(
+            issue="null_origin_allowed",
+            severity="medium",
+            description=(
+                "CORS explicitly allows the null origin."
+            ),
+        )
+    ]
 
 
 def test_allowed_methods_are_parsed():
@@ -224,7 +261,7 @@ def test_empty_values_are_ignored():
     )
 
 
-def test_origin_matching_is_case_sensitive_for_wildcard():
+def test_wildcard_origin_allows_whitespace():
     result = CORSAnalyzer().analyze(
         make_analysis(
             {
@@ -299,3 +336,82 @@ def test_no_origin_means_not_enabled():
     )
 
     assert result.enabled is False
+    assert result.issues == []
+
+
+def test_wildcard_methods_are_detected():
+    result = CORSAnalyzer().analyze(
+        make_analysis(
+            {
+                "Access-Control-Allow-Methods": "*",
+            }
+        )
+    )
+
+    assert result.issues == [
+        CORSIssue(
+            issue="wildcard_methods",
+            severity="low",
+            description=(
+                "CORS allows all methods through a "
+                "wildcard method value."
+            ),
+        )
+    ]
+
+
+def test_wildcard_headers_are_detected():
+    result = CORSAnalyzer().analyze(
+        make_analysis(
+            {
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    )
+
+    assert result.issues == [
+        CORSIssue(
+            issue="wildcard_headers",
+            severity="low",
+            description=(
+                "CORS allows all request headers through "
+                "a wildcard header value."
+            ),
+        )
+    ]
+
+
+def test_multiple_cors_issues_are_collected():
+    result = CORSAnalyzer().analyze(
+        make_analysis(
+            {
+                "Access-Control-Allow-Origin":
+                    "https://client.example",
+                "Access-Control-Allow-Credentials":
+                    "true",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    )
+
+    assert len(result.issues) == 3
+
+    assert result.issues[0].issue == (
+        "origin_with_credentials"
+    )
+    assert result.issues[1].issue == "wildcard_methods"
+    assert result.issues[2].issue == "wildcard_headers"
+
+
+def test_cors_issue_is_immutable():
+    issue = CORSIssue(
+        issue="test",
+        severity="low",
+        description="test",
+    )
+
+    with pytest.raises(
+        AttributeError
+    ):
+        issue.severity = "high"
