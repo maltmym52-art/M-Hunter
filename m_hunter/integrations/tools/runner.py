@@ -49,9 +49,7 @@ class ToolRunner:
         env: dict[str, str] | None = None,
     ) -> ToolResult:
         if not command:
-            raise ValueError(
-                "command must not be empty"
-            )
+            raise ValueError("command must not be empty")
 
         normalized_command = tuple(
             str(argument)
@@ -76,16 +74,19 @@ class ToolRunner:
 
         start = time.perf_counter()
 
+        process = subprocess.Popen(
+            normalized_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+            cwd=cwd,
+            env=env,
+            shell=False,
+        )
+
         try:
-            process = subprocess.run(
-                normalized_command,
-                capture_output=True,
-                text=True,
-                timeout=resolved_timeout,
-                cwd=cwd,
-                env=env,
-                shell=False,
-                check=False,
+            stdout, stderr = process.communicate(
+                timeout=resolved_timeout
             )
 
             duration = time.perf_counter() - start
@@ -93,34 +94,52 @@ class ToolRunner:
             return ToolResult(
                 command=normalized_command,
                 return_code=process.returncode,
-                stdout=process.stdout,
-                stderr=process.stderr,
+                stdout=stdout.decode(
+                    "utf-8",
+                    errors="replace",
+                ),
+                stderr=stderr.decode(
+                    "utf-8",
+                    errors="replace",
+                ),
                 duration=duration,
             )
 
         except subprocess.TimeoutExpired as exc:
+            partial_stdout = exc.stdout or b""
+            partial_stderr = exc.stderr or b""
+
+            process.kill()
+
+            remaining_stdout, remaining_stderr = (
+                process.communicate()
+            )
+
+            if remaining_stdout:
+                partial_stdout += remaining_stdout
+
+            if remaining_stderr:
+                partial_stderr += remaining_stderr
+
             duration = time.perf_counter() - start
 
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
+            if isinstance(partial_stdout, str):
+                partial_stdout = partial_stdout.encode()
 
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode(
-                    "utf-8",
-                    errors="replace",
-                )
-
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(
-                    "utf-8",
-                    errors="replace",
-                )
+            if isinstance(partial_stderr, str):
+                partial_stderr = partial_stderr.encode()
 
             return ToolResult(
                 command=normalized_command,
                 return_code=None,
-                stdout=stdout,
-                stderr=stderr,
+                stdout=partial_stdout.decode(
+                    "utf-8",
+                    errors="replace",
+                ),
+                stderr=partial_stderr.decode(
+                    "utf-8",
+                    errors="replace",
+                ),
                 duration=duration,
                 timed_out=True,
             )
