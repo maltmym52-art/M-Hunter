@@ -214,3 +214,91 @@ def test_binary_content_is_not_text():
     )
 
     assert response.is_text() is False
+
+
+def test_get_headers_all_returns_single_header():
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "content-type": "text/html",
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    assert response.get_headers_all(
+        "Content-Type"
+    ) == ["text/html"]
+
+
+def test_get_headers_all_returns_repeated_headers():
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "set-cookie": "session=abc; Secure",
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+        repeated_headers={
+            "set-cookie": [
+                "theme=dark; Path=/",
+                "token=xyz; HttpOnly",
+            ],
+        },
+    )
+
+    assert response.get_headers_all(
+        "Set-Cookie"
+    ) == [
+        "session=abc; Secure",
+        "theme=dark; Path=/",
+        "token=xyz; HttpOnly",
+    ]
+
+
+def test_get_headers_all_is_case_insensitive():
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "Set-Cookie": "session=abc",
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+        repeated_headers={
+            "SET-COOKIE": [
+                "theme=dark",
+            ],
+        },
+    )
+
+    assert response.get_headers_all(
+        "set-cookie"
+    ) == [
+        "session=abc",
+        "theme=dark",
+    ]
+
+
+def test_get_headers_all_missing_header():
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={},
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    assert response.get_headers_all(
+        "Set-Cookie"
+    ) == []

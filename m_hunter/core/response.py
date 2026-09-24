@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -11,6 +11,9 @@ class HttpResponse:
     cookies: dict[str, str]
     response_time: float
     content_length: int
+    repeated_headers: dict[str, list[str]] = field(
+        default_factory=dict
+    )
 
     @property
     def status_category(self) -> str:
@@ -62,6 +65,26 @@ class HttpResponse:
             ),
             None,
         )
+
+    def get_headers_all(
+        self,
+        name: str,
+    ) -> list[str]:
+        name = name.lower()
+
+        values = [
+            value
+            for header_name, value in self.headers.items()
+            if header_name.lower() == name
+        ]
+
+        for header_name, repeated_values in (
+            self.repeated_headers.items()
+        ):
+            if header_name.lower() == name:
+                values.extend(repeated_values)
+
+        return values
 
     def get_cookie(self, name: str) -> str | None:
         return self.cookies.get(name)
