@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl
 
+from m_hunter.analyzers.set_cookie import (
+    SetCookie,
+    SetCookieParser,
+)
 from m_hunter.core.request import HttpRequest
 from m_hunter.core.response import HttpResponse
 
@@ -77,7 +81,7 @@ class HTTPAnalysis:
         self,
         name: str,
     ) -> str | None:
-        name = name.strip().lower()
+        name = name.lower()
 
         for header in self.request_headers:
             if header.normalized_name == name:
@@ -89,7 +93,7 @@ class HTTPAnalysis:
         self,
         name: str,
     ) -> str | None:
-        name = name.strip().lower()
+        name = name.lower()
 
         for header in self.response_headers:
             if header.normalized_name == name:
@@ -101,13 +105,17 @@ class HTTPAnalysis:
         self,
         name: str,
     ) -> bool:
-        return self.response_header(name) is not None
+        return (
+            self.response_header(name) is not None
+        )
 
     def has_request_header(
         self,
         name: str,
     ) -> bool:
-        return self.request_header(name) is not None
+        return (
+            self.request_header(name) is not None
+        )
 
     def security_headers(self) -> dict[str, str]:
         names = {
@@ -161,6 +169,20 @@ class HTTPAnalysis:
             if header.normalized_name in names
         }
 
+    def set_cookie_headers(self) -> list[str]:
+        return [
+            header.value
+            for header in self.response_headers
+            if header.normalized_name == "set-cookie"
+        ]
+
+    def parsed_set_cookies(self) -> list[SetCookie]:
+        parser = SetCookieParser()
+
+        return parser.parse_many(
+            self.set_cookie_headers()
+        )
+
 
 class HTTPAnalyzer:
     def analyze(
@@ -168,60 +190,64 @@ class HTTPAnalyzer:
         request: HttpRequest,
         response: HttpResponse,
     ) -> HTTPAnalysis:
-        if not isinstance(
-            request,
-            HttpRequest,
-        ):
+        if not isinstance(request, HttpRequest):
             raise TypeError(
                 "request must be an instance of HttpRequest"
             )
 
-        if not isinstance(
-            response,
-            HttpResponse,
-        ):
+        if not isinstance(response, HttpResponse):
             raise TypeError(
                 "response must be an instance of HttpResponse"
             )
 
+        request_headers = [
+            HeaderInfo(
+                name=name,
+                value=value,
+            )
+            for name, value in request.headers.items()
+        ]
+
+        response_headers = [
+            HeaderInfo(
+                name=name,
+                value=value,
+            )
+            for name, value in response.headers.items()
+        ]
+
+        request_cookies = [
+            CookieInfo(
+                name=name,
+                value=value,
+            )
+            for name, value in request.cookies.items()
+        ]
+
+        response_cookies = [
+            CookieInfo(
+                name=name,
+                value=value,
+            )
+            for name, value in response.cookies.items()
+        ]
+
+        query_parameters = tuple(
+            name
+            for name, _ in parse_qsl(
+                request.full_url.split("?", 1)[1]
+                if "?" in request.full_url
+                else "",
+                keep_blank_values=True,
+            )
+        )
+
         return HTTPAnalysis(
             request=request,
             response=response,
-            request_headers=[
-                HeaderInfo(
-                    name=name,
-                    value=value,
-                )
-                for name, value in request.headers.items()
-            ],
-            response_headers=[
-                HeaderInfo(
-                    name=name,
-                    value=value,
-                )
-                for name, value in response.headers.items()
-            ],
-            request_cookies=[
-                CookieInfo(
-                    name=name,
-                    value=value,
-                )
-                for name, value in request.cookies.items()
-            ],
-            response_cookies=[
-                CookieInfo(
-                    name=name,
-                    value=value,
-                )
-                for name, value in response.cookies.items()
-            ],
-            query_parameters=tuple(
-                name
-                for name, _ in parse_qsl(
-                    request.full_url.split("?", 1)[1]
-                    if "?" in request.full_url
-                    else "",
-                    keep_blank_values=True,
-                )
-            ),
+            request_headers=request_headers,
+            response_headers=response_headers,
+            request_cookies=request_cookies,
+            response_cookies=response_cookies,
+            query_parameters=query_parameters,
         )

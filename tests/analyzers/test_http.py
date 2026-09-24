@@ -338,3 +338,129 @@ def test_empty_headers_and_cookies():
     assert analysis.security_headers() == {}
     assert analysis.cors_headers() == {}
     assert analysis.authentication_headers() == {}
+
+
+def test_set_cookie_headers_are_extracted():
+    request = HttpRequest(
+        method="GET",
+        url="https://example.com",
+    )
+
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "content-type": "text/html",
+            "set-cookie": (
+                "session=abc123; "
+                "Secure; HttpOnly; SameSite=Lax"
+            ),
+        },
+        content=b"<html></html>",
+        cookies={},
+        response_time=0.1,
+        content_length=15,
+    )
+
+    analysis = HTTPAnalyzer().analyze(
+        request,
+        response,
+    )
+
+    assert analysis.set_cookie_headers() == [
+        (
+            "session=abc123; "
+            "Secure; HttpOnly; SameSite=Lax"
+        )
+    ]
+
+
+def test_set_cookie_headers_can_be_parsed():
+    request = HttpRequest(
+        method="GET",
+        url="https://example.com",
+    )
+
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "set-cookie": (
+                "session=abc123; "
+                "Secure; HttpOnly; SameSite=Strict"
+            ),
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    analysis = HTTPAnalyzer().analyze(
+        request,
+        response,
+    )
+
+    cookies = analysis.parsed_set_cookies()
+
+    assert len(cookies) == 1
+    assert cookies[0].name == "session"
+    assert cookies[0].value == "abc123"
+    assert cookies[0].secure is True
+    assert cookies[0].httponly is True
+    assert cookies[0].samesite == "Strict"
+
+
+def test_no_set_cookie_headers_returns_empty_list():
+    request = HttpRequest(
+        method="GET",
+        url="https://example.com",
+    )
+
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "content-type": "text/html",
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    analysis = HTTPAnalyzer().analyze(
+        request,
+        response,
+    )
+
+    assert analysis.set_cookie_headers() == []
+    assert analysis.parsed_set_cookies() == []
+
+
+def test_set_cookie_header_is_case_insensitive():
+    request = HttpRequest(
+        method="GET",
+        url="https://example.com",
+    )
+
+    response = HttpResponse(
+        status_code=200,
+        url="https://example.com",
+        headers={
+            "Set-Cookie": "session=abc; Secure",
+        },
+        content=b"OK",
+        cookies={},
+        response_time=0.1,
+        content_length=2,
+    )
+
+    analysis = HTTPAnalyzer().analyze(
+        request,
+        response,
+    )
+
+    assert len(
+        analysis.parsed_set_cookies()
+    ) == 1
