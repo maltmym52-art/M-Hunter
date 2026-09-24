@@ -538,3 +538,48 @@ def test_http_engine_context_manager_closes_after_exception(
 
     assert engine.is_closed is True
     assert FakeClient.instances[0].closed is True
+
+
+def test_http_engine_preserves_repeated_headers(monkeypatch):
+    class Client(FakeClient):
+        def request(self, method, url, **kwargs):
+            return FakeResponse(
+                headers=httpx.Headers([
+                    (
+                        "set-cookie",
+                        "session=abc; Secure; HttpOnly",
+                    ),
+                    (
+                        "set-cookie",
+                        "theme=dark; Path=/",
+                    ),
+                    (
+                        "content-type",
+                        "text/plain",
+                    ),
+                ])
+            )
+
+    monkeypatch.setattr(
+        "m_hunter.core.http.httpx.Client",
+        Client,
+    )
+
+    engine = HttpEngine()
+
+    response = engine.get(
+        "https://example.com"
+    )
+
+    assert response.repeated_headers == {
+        "set-cookie": [
+            "theme=dark; Path=/",
+        ],
+    }
+
+    assert response.get_headers_all("set-cookie") == [
+        "session=abc; Secure; HttpOnly",
+        "theme=dark; Path=/",
+    ]
+
+    engine.close()

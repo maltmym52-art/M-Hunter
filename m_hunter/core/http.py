@@ -82,14 +82,19 @@ class HttpEngine:
             response_time = time.perf_counter() - start_time
             content = response.content
 
+            headers, repeated_headers = (
+                self._extract_response_headers(response)
+            )
+
             return HttpResponse(
                 status_code=response.status_code,
                 url=str(response.url),
-                headers=dict(response.headers),
+                headers=headers,
                 content=content,
                 cookies=dict(response.cookies),
                 response_time=response_time,
                 content_length=len(content),
+                repeated_headers=repeated_headers,
             )
 
         except httpx.TimeoutException as exc:
@@ -111,6 +116,31 @@ class HttpEngine:
             raise RuntimeError(
                 f"HTTP error while requesting: {url}"
             ) from exc
+
+    @staticmethod
+    def _extract_response_headers(
+        response: httpx.Response,
+    ) -> tuple[dict[str, str], dict[str, list[str]]]:
+        if not hasattr(response.headers, "multi_items"):
+            return dict(response.headers), {}
+
+        grouped: dict[str, list[str]] = {}
+
+        for name, value in response.headers.multi_items():
+            grouped.setdefault(name, []).append(value)
+
+        headers = {
+            name: values[0]
+            for name, values in grouped.items()
+        }
+
+        repeated_headers = {
+            name: values[1:]
+            for name, values in grouped.items()
+            if len(values) > 1
+        }
+
+        return headers, repeated_headers
 
     def send(self, request: HttpRequest) -> HttpResponse:
         if not isinstance(request, HttpRequest):
