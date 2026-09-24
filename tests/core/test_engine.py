@@ -1,3 +1,7 @@
+from m_hunter.analyzers.base import BaseAnalyzer
+from m_hunter.analyzers.metadata import MetadataAnalyzer
+from m_hunter.analyzers.registry import AnalyzerRegistry
+from m_hunter.core.response import HttpResponse
 from m_hunter.core.engine import ScanEngine
 from m_hunter.core.finding import Finding
 from m_hunter.scanners.base import BaseScanner
@@ -292,3 +296,205 @@ def test_auto_discovered_scanners_can_run():
         finding.target == "https://example.com"
         for finding in findings
     )
+
+
+class CustomEngineAnalyzer(BaseAnalyzer):
+    name = "custom"
+    description = "Custom engine analyzer"
+
+    def analyze(self, response: HttpResponse) -> dict:
+        return {
+            "status": response.status_code,
+            "custom": True,
+        }
+
+
+class AnotherEngineAnalyzer(BaseAnalyzer):
+    name = "another"
+    description = "Another engine analyzer"
+
+    def analyze(self, response: HttpResponse) -> dict:
+        return {
+            "another": True,
+        }
+
+
+def make_analyzer_response(
+    status_code: int = 200,
+) -> HttpResponse:
+    return HttpResponse(
+        status_code=status_code,
+        url="https://example.com",
+        headers={
+            "Content-Type": "text/html",
+        },
+        content=b"<html>test</html>",
+        cookies={},
+        response_time=0.25,
+        content_length=17,
+    )
+
+
+def test_scan_engine_creates_default_analyzer_registry():
+    engine = ScanEngine(
+        auto_discover=False,
+    )
+
+    assert isinstance(
+        engine.analyzer_registry,
+        AnalyzerRegistry,
+    )
+
+    assert engine.analyzer_registry.count() == 0
+
+
+def test_scan_engine_accepts_custom_analyzer_registry():
+    registry = AnalyzerRegistry()
+    analyzer = MetadataAnalyzer()
+
+    registry.register(analyzer)
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    assert engine.analyzer_registry is registry
+    assert engine.analyzer_registry.get("metadata") is analyzer
+
+
+def test_run_analyzers_returns_empty_dict_when_registry_is_empty():
+    engine = ScanEngine(
+        auto_discover=False,
+    )
+
+    response = make_analyzer_response()
+
+    results = engine.run_analyzers(response)
+
+    assert results == {}
+
+
+def test_run_analyzers_runs_registered_analyzer():
+    registry = AnalyzerRegistry()
+    analyzer = CustomEngineAnalyzer()
+
+    registry.register(analyzer)
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    response = make_analyzer_response(
+        status_code=201,
+    )
+
+    results = engine.run_analyzers(response)
+
+    assert results == {
+        "custom": {
+            "status": 201,
+            "custom": True,
+        }
+    }
+
+
+def test_run_analyzers_runs_multiple_analyzers():
+    registry = AnalyzerRegistry()
+
+    first = CustomEngineAnalyzer()
+    second = AnotherEngineAnalyzer()
+
+    registry.register(first)
+    registry.register(second)
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    response = make_analyzer_response()
+
+    results = engine.run_analyzers(response)
+
+    assert results == {
+        "custom": {
+            "status": 200,
+            "custom": True,
+        },
+        "another": {
+            "another": True,
+        },
+    }
+
+
+def test_run_analyzers_uses_registered_analyzer_names():
+    registry = AnalyzerRegistry()
+    analyzer = CustomEngineAnalyzer()
+
+    registry.register(analyzer)
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    results = engine.run_analyzers(
+        make_analyzer_response()
+    )
+
+    assert list(results.keys()) == ["custom"]
+
+
+def test_run_analyzers_passes_same_response_to_analyzer():
+    class IdentityAnalyzer(BaseAnalyzer):
+        name = "identity"
+        description = "Checks response identity"
+
+        def analyze(self, response: HttpResponse) -> dict:
+            return {
+                "same_response": response.status_code == 404,
+            }
+
+    registry = AnalyzerRegistry()
+    registry.register(IdentityAnalyzer())
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    results = engine.run_analyzers(
+        make_analyzer_response(status_code=404)
+    )
+
+    assert results["identity"]["same_response"] is True
+
+
+def test_run_analyzers_with_metadata_analyzer():
+    registry = AnalyzerRegistry()
+    registry.register(MetadataAnalyzer())
+
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    response = make_analyzer_response()
+
+    results = engine.run_analyzers(response)
+
+    assert "metadata" in results
+    assert results["metadata"]["status_code"] == 200
+    assert results["metadata"]["url"] == "https://example.com"
+    assert results["metadata"]["is_html"] is True
+
+
+def test_scan_engine_scanner_registry_and_analyzer_registry_are_independent():
+    engine = ScanEngine(
+        auto_discover=False,
+    )
+
+    assert engine.registry.count() == 0
+    assert engine.analyzer_registry.count() == 0
