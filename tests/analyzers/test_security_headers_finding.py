@@ -255,3 +255,193 @@ def test_present_headers_are_not_reported():
     findings = analyzer.analyze_response(response)
 
     assert findings == []
+
+
+def test_hsts_missing_max_age_creates_finding():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "strict-transport-security":
+                    "includeSubDomains",
+            },
+            "missing": [],
+            "issues": [
+                {
+                    "header": "strict-transport-security",
+                    "issue": "missing_max_age",
+                    "severity": "medium",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert len(findings) == 1
+
+    finding = findings[0]
+
+    assert finding.title == (
+        "Strict-Transport-Security Missing max-age"
+    )
+    assert finding.severity == "Medium"
+    assert finding.confidence == "High"
+    assert finding.cwe == "CWE-319"
+    assert finding.owasp == "A05:2021"
+    assert "missing_max_age" in finding.evidence
+
+
+def test_hsts_short_max_age_creates_finding():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "strict-transport-security":
+                    "max-age=3600",
+            },
+            "missing": [],
+            "issues": [
+                {
+                    "header": "strict-transport-security",
+                    "issue": "short_max_age",
+                    "severity": "low",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert len(findings) == 1
+    assert findings[0].severity == "Low"
+    assert findings[0].cwe == "CWE-319"
+
+
+def test_invalid_security_header_value_creates_finding():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "x-frame-options": "ALLOWALL",
+            },
+            "missing": [],
+            "issues": [
+                {
+                    "header": "x-frame-options",
+                    "issue": "invalid_value",
+                    "severity": "medium",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert len(findings) == 1
+
+    finding = findings[0]
+
+    assert finding.title == "Invalid Security Header Value"
+    assert finding.severity == "Medium"
+    assert finding.confidence == "High"
+    assert "x-frame-options" in finding.evidence
+    assert "ALLOWALL" in finding.evidence
+
+
+def test_empty_security_header_creates_finding():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "content-security-policy": "",
+            },
+            "missing": [],
+            "issues": [
+                {
+                    "header": "content-security-policy",
+                    "issue": "empty_value",
+                    "severity": "medium",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert len(findings) == 1
+    assert findings[0].severity == "Medium"
+
+
+def test_unknown_issue_is_ignored():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "x-frame-options": "DENY",
+            },
+            "missing": [],
+            "issues": [
+                {
+                    "header": "x-frame-options",
+                    "issue": "unknown_issue",
+                    "severity": "high",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert findings == []
+
+
+def test_missing_and_value_issues_create_findings():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    findings = analyzer.analyze(
+        {
+            "present": {
+                "x-frame-options": "ALLOWALL",
+            },
+            "missing": [
+                "content-security-policy",
+            ],
+            "issues": [
+                {
+                    "header": "x-frame-options",
+                    "issue": "invalid_value",
+                    "severity": "medium",
+                }
+            ],
+        },
+        target="https://example.com",
+    )
+
+    assert len(findings) == 2
+    assert findings[0].title == (
+        "Missing Content-Security-Policy Header"
+    )
+    assert findings[1].title == (
+        "Invalid Security Header Value"
+    )
+
+
+def test_analyze_response_reports_value_issues():
+    analyzer = SecurityHeadersFindingAnalyzer()
+
+    response = make_response(
+        headers={
+            "Strict-Transport-Security":
+                "max-age=3600",
+            "X-Content-Type-Options":
+                "invalid",
+        }
+    )
+
+    findings = analyzer.analyze_response(response)
+
+    titles = [finding.title for finding in findings]
+
+    assert "Strict-Transport-Security max-age Is Too Short" in titles
+    assert "Invalid Security Header Value" in titles

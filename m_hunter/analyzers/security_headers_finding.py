@@ -100,6 +100,82 @@ class SecurityHeadersFindingAnalyzer(FindingAnalyzer):
         },
     }
 
+    ISSUE_METADATA = {
+        "missing_max_age": {
+            "title": "Strict-Transport-Security Missing max-age",
+            "severity": "Medium",
+            "confidence": "High",
+            "description": (
+                "The Strict-Transport-Security header is present "
+                "but does not define a max-age directive."
+            ),
+            "remediation": (
+                "Configure Strict-Transport-Security with an appropriate "
+                "max-age value."
+            ),
+            "cwe": "CWE-319",
+            "owasp": "A05:2021",
+        },
+        "short_max_age": {
+            "title": "Strict-Transport-Security max-age Is Too Short",
+            "severity": "Low",
+            "confidence": "High",
+            "description": (
+                "The Strict-Transport-Security header uses a "
+                "short max-age value."
+            ),
+            "remediation": (
+                "Use an appropriate long-lived HSTS max-age after "
+                "confirming the application is fully HTTPS-compatible."
+            ),
+            "cwe": "CWE-319",
+            "owasp": "A05:2021",
+        },
+        "invalid_max_age": {
+            "title": "Invalid Strict-Transport-Security max-age",
+            "severity": "Medium",
+            "confidence": "High",
+            "description": (
+                "The Strict-Transport-Security header contains "
+                "an invalid max-age value."
+            ),
+            "remediation": (
+                "Configure max-age using a valid numeric value."
+            ),
+            "cwe": "CWE-319",
+            "owasp": "A05:2021",
+        },
+        "invalid_value": {
+            "title": "Invalid Security Header Value",
+            "severity": "Medium",
+            "confidence": "High",
+            "description": (
+                "A security header is present but uses a value "
+                "that does not match the expected format."
+            ),
+            "remediation": (
+                "Review the security header configuration and "
+                "use a standards-compliant value."
+            ),
+            "cwe": "CWE-693",
+            "owasp": "A05:2021",
+        },
+        "empty_value": {
+            "title": "Empty Security Header Value",
+            "severity": "Medium",
+            "confidence": "High",
+            "description": (
+                "A security header is present but has an empty value."
+            ),
+            "remediation": (
+                "Configure the security header with an appropriate "
+                "non-empty value."
+            ),
+            "cwe": "CWE-693",
+            "owasp": "A05:2021",
+        },
+    }
+
     def analyze(
         self,
         analysis: dict,
@@ -120,20 +196,55 @@ class SecurityHeadersFindingAnalyzer(FindingAnalyzer):
                 f"is missing the {header_name} header."
             )
 
-            finding = self.create_finding(
-                title=metadata["title"],
-                severity=metadata["severity"],
-                confidence=metadata["confidence"],
-                target=target,
-                endpoint=endpoint,
-                description=metadata["description"],
-                evidence=evidence,
-                remediation=metadata["remediation"],
-                cwe=metadata["cwe"],
-                owasp=metadata["owasp"],
+            findings.append(
+                self.create_finding(
+                    title=metadata["title"],
+                    severity=metadata["severity"],
+                    confidence=metadata["confidence"],
+                    target=target,
+                    endpoint=endpoint,
+                    description=metadata["description"],
+                    evidence=evidence,
+                    remediation=metadata["remediation"],
+                    cwe=metadata["cwe"],
+                    owasp=metadata["owasp"],
+                )
             )
 
-            findings.append(finding)
+        for issue in analysis.get("issues", []):
+            issue_name = issue.get("issue")
+            header_name = issue.get("header")
+
+            metadata = self.ISSUE_METADATA.get(issue_name)
+
+            if metadata is None:
+                continue
+
+            value = analysis.get("present", {}).get(
+                header_name,
+                "",
+            )
+
+            evidence = (
+                f"HTTP response from {endpoint or target} "
+                f"contains {header_name}: {value!r}; "
+                f"detected issue: {issue_name}."
+            )
+
+            findings.append(
+                self.create_finding(
+                    title=metadata["title"],
+                    severity=metadata["severity"],
+                    confidence=metadata["confidence"],
+                    target=target,
+                    endpoint=endpoint,
+                    description=metadata["description"],
+                    evidence=evidence,
+                    remediation=metadata["remediation"],
+                    cwe=metadata["cwe"],
+                    owasp=metadata["owasp"],
+                )
+            )
 
         return findings
 
