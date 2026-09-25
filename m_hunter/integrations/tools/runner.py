@@ -85,62 +85,64 @@ class ToolRunner:
             shell=False,
         )
 
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        def read_stream(
+            stream,
+            chunks: list[bytes],
+        ) -> None:
+            while True:
+                data = stream.read(4096)
+                if not data:
+                    break
+                chunks.append(data)
+
+        stdout_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stdout, stdout_chunks),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=read_stream,
+            args=(process.stderr, stderr_chunks),
+            daemon=True,
+        )
+
+        stdout_thread.start()
+        stderr_thread.start()
+
+        timed_out = False
+
         try:
-            stdout, stderr = process.communicate(
-                timeout=resolved_timeout
-            )
-
-            duration = time.perf_counter() - start
-
-            return ToolResult(
-                command=normalized_command,
-                return_code=process.returncode,
-                stdout=stdout.decode(
-                    "utf-8",
-                    errors="replace",
-                ),
-                stderr=stderr.decode(
-                    "utf-8",
-                    errors="replace",
-                ),
-                duration=duration,
-            )
-
-        except subprocess.TimeoutExpired as exc:
+            process.wait(timeout=resolved_timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
             process.kill()
+            process.wait()
 
-            stdout, stderr = process.communicate()
+        stdout_thread.join()
+        stderr_thread.join()
 
-            if exc.output:
-                stdout = (
-                    exc.output
-                    if stdout is None
-                    else stdout
-                )
+        duration = time.perf_counter() - start
 
-            if exc.stderr:
-                stderr = (
-                    exc.stderr
-                    if stderr is None
-                    else stderr
-                )
+        stdout = b"".join(stdout_chunks)
+        stderr = b"".join(stderr_chunks)
 
-            duration = time.perf_counter() - start
-
-            return ToolResult(
-                command=normalized_command,
-                return_code=None,
-                stdout=stdout.decode(
-                    "utf-8",
-                    errors="replace",
-                ) if stdout else "",
-                stderr=stderr.decode(
-                    "utf-8",
-                    errors="replace",
-                ) if stderr else "",
-                duration=duration,
-                timed_out=True,
-            )
+        return ToolResult(
+            command=normalized_command,
+            return_code=None if timed_out else process.returncode,
+            stdout=stdout.decode(
+                "utf-8",
+                errors="replace",
+            ),
+            stderr=stderr.decode(
+                "utf-8",
+                errors="replace",
+            ),
+            duration=duration,
+            timed_out=timed_out,
+        )
 
     def run_if_available(
         self,
