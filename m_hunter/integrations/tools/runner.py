@@ -90,7 +90,7 @@ class ToolRunner:
 
         def read_stream(stream, chunks):
             while True:
-                data = stream.read1(4096)
+                data = stream.read(4096)
                 if not data:
                     break
                 chunks.append(data)
@@ -100,7 +100,6 @@ class ToolRunner:
             args=(process.stdout, stdout_chunks),
             daemon=True,
         )
-
         stderr_thread = threading.Thread(
             target=read_stream,
             args=(process.stderr, stderr_chunks),
@@ -111,9 +110,7 @@ class ToolRunner:
         stderr_thread.start()
 
         try:
-            process.wait(
-                timeout=resolved_timeout
-            )
+            process.wait(timeout=resolved_timeout)
 
             stdout_thread.join()
             stderr_thread.join()
@@ -123,15 +120,11 @@ class ToolRunner:
             return ToolResult(
                 command=normalized_command,
                 return_code=process.returncode,
-                stdout=b"".join(
-                    stdout_chunks
-                ).decode(
+                stdout=b"".join(stdout_chunks).decode(
                     "utf-8",
                     errors="replace",
                 ),
-                stderr=b"".join(
-                    stderr_chunks
-                ).decode(
+                stderr=b"".join(stderr_chunks).decode(
                     "utf-8",
                     errors="replace",
                 ),
@@ -142,23 +135,19 @@ class ToolRunner:
             process.kill()
             process.wait()
 
-            stdout_thread.join()
-            stderr_thread.join()
+            stdout_thread.join(timeout=1.0)
+            stderr_thread.join(timeout=1.0)
 
             duration = time.perf_counter() - start
 
             return ToolResult(
                 command=normalized_command,
                 return_code=None,
-                stdout=b"".join(
-                    stdout_chunks
-                ).decode(
+                stdout=b"".join(stdout_chunks).decode(
                     "utf-8",
                     errors="replace",
                 ),
-                stderr=b"".join(
-                    stderr_chunks
-                ).decode(
+                stderr=b"".join(stderr_chunks).decode(
                     "utf-8",
                     errors="replace",
                 ),
