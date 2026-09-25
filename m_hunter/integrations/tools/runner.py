@@ -85,72 +85,59 @@ class ToolRunner:
             shell=False,
         )
 
-        stdout_chunks: list[bytes] = []
-        stderr_chunks: list[bytes] = []
-
-        def read_stream(stream, chunks):
-            while True:
-                data = stream.read(4096)
-                if not data:
-                    break
-                chunks.append(data)
-
-        stdout_thread = threading.Thread(
-            target=read_stream,
-            args=(process.stdout, stdout_chunks),
-            daemon=True,
-        )
-        stderr_thread = threading.Thread(
-            target=read_stream,
-            args=(process.stderr, stderr_chunks),
-            daemon=True,
-        )
-
-        stdout_thread.start()
-        stderr_thread.start()
-
         try:
-            process.wait(timeout=resolved_timeout)
-
-            stdout_thread.join()
-            stderr_thread.join()
+            stdout, stderr = process.communicate(
+                timeout=resolved_timeout
+            )
 
             duration = time.perf_counter() - start
 
             return ToolResult(
                 command=normalized_command,
                 return_code=process.returncode,
-                stdout=b"".join(stdout_chunks).decode(
+                stdout=stdout.decode(
                     "utf-8",
                     errors="replace",
                 ),
-                stderr=b"".join(stderr_chunks).decode(
+                stderr=stderr.decode(
                     "utf-8",
                     errors="replace",
                 ),
                 duration=duration,
             )
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             process.kill()
-            process.wait()
 
-            stdout_thread.join(timeout=1.0)
-            stderr_thread.join(timeout=1.0)
+            stdout, stderr = process.communicate()
+
+            if exc.output:
+                stdout = (
+                    exc.output
+                    if stdout is None
+                    else stdout
+                )
+
+            if exc.stderr:
+                stderr = (
+                    exc.stderr
+                    if stderr is None
+                    else stderr
+                )
 
             duration = time.perf_counter() - start
 
             return ToolResult(
                 command=normalized_command,
                 return_code=None,
-                stdout=b"".join(stdout_chunks).decode(
+                stdout=stdout.decode(
                     "utf-8",
                     errors="replace",
-                ),
-                stderr=b"".join(stderr_chunks).decode(
+                ) if stdout else "",
+                stderr=stderr.decode(
                     "utf-8",
                     errors="replace",
-                ),
+                ) if stderr else "",
                 duration=duration,
                 timed_out=True,
             )
