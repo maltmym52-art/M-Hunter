@@ -88,21 +88,19 @@ class ToolRunner:
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
 
-        def read_stream(
-            stream,
-            chunks: list[bytes],
-        ) -> None:
+        def read_stream(stream, chunks):
             while True:
-                data = stream.read(4096)
-                if not data:
+                line = stream.readline()
+                if not line:
                     break
-                chunks.append(data)
+                chunks.append(line)
 
         stdout_thread = threading.Thread(
             target=read_stream,
             args=(process.stdout, stdout_chunks),
             daemon=True,
         )
+
         stderr_thread = threading.Thread(
             target=read_stream,
             args=(process.stderr, stderr_chunks),
@@ -116,13 +114,14 @@ class ToolRunner:
 
         try:
             process.wait(timeout=resolved_timeout)
+
         except subprocess.TimeoutExpired:
             timed_out = True
             process.kill()
             process.wait()
 
-        stdout_thread.join()
-        stderr_thread.join()
+        stdout_thread.join(timeout=1.0)
+        stderr_thread.join(timeout=1.0)
 
         duration = time.perf_counter() - start
 
