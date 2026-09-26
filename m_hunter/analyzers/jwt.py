@@ -21,6 +21,22 @@ class JWTIndicatorType(str, Enum):
     JWT_IN_AUTHORIZATION = "jwt_in_authorization"
     SENSITIVE_DATA = "sensitive_data"
     INVALID_STRUCTURE = "invalid_structure"
+    EXPIRED_TOKEN = "expired_token"
+    NOT_YET_VALID_TOKEN = "not_yet_valid_token"
+    INVALID_EXPIRATION = "invalid_expiration"
+    INVALID_ISSUED_AT = "invalid_issued_at"
+    INVALID_NOT_BEFORE = "invalid_not_before"
+    ISSUER_PRESENT = "issuer_present"
+    AUDIENCE_PRESENT = "audience_present"
+    KID_HEADER = "kid_header"
+    JKU_HEADER = "jku_header"
+    X5U_HEADER = "x5u_header"
+    JWK_HEADER = "jwk_header"
+    SUSPICIOUS_HEADER = "suspicious_header"
+    MISSING_TYP = "missing_typ"
+    UNEXPECTED_TYP = "unexpected_typ"
+    CRITICAL_HEADER = "critical_header"
+    DUPLICATE_CLAIM_CONTEXT = "duplicate_claim_context"
 
 
 @dataclass(frozen=True)
@@ -115,6 +131,70 @@ class JWTAnalysis:
     def invalid_structure(self) -> bool:
         return JWTIndicatorType.INVALID_STRUCTURE in self.types
 
+    @property
+    def expired_token(self) -> bool:
+        return JWTIndicatorType.EXPIRED_TOKEN in self.types
+
+    @property
+    def not_yet_valid_token(self) -> bool:
+        return JWTIndicatorType.NOT_YET_VALID_TOKEN in self.types
+
+    @property
+    def invalid_expiration(self) -> bool:
+        return JWTIndicatorType.INVALID_EXPIRATION in self.types
+
+    @property
+    def invalid_issued_at(self) -> bool:
+        return JWTIndicatorType.INVALID_ISSUED_AT in self.types
+
+    @property
+    def invalid_not_before(self) -> bool:
+        return JWTIndicatorType.INVALID_NOT_BEFORE in self.types
+
+    @property
+    def issuer_present(self) -> bool:
+        return JWTIndicatorType.ISSUER_PRESENT in self.types
+
+    @property
+    def audience_present(self) -> bool:
+        return JWTIndicatorType.AUDIENCE_PRESENT in self.types
+
+    @property
+    def kid_header(self) -> bool:
+        return JWTIndicatorType.KID_HEADER in self.types
+
+    @property
+    def jku_header(self) -> bool:
+        return JWTIndicatorType.JKU_HEADER in self.types
+
+    @property
+    def x5u_header(self) -> bool:
+        return JWTIndicatorType.X5U_HEADER in self.types
+
+    @property
+    def jwk_header(self) -> bool:
+        return JWTIndicatorType.JWK_HEADER in self.types
+
+    @property
+    def suspicious_header(self) -> bool:
+        return JWTIndicatorType.SUSPICIOUS_HEADER in self.types
+
+    @property
+    def missing_typ(self) -> bool:
+        return JWTIndicatorType.MISSING_TYP in self.types
+
+    @property
+    def unexpected_typ(self) -> bool:
+        return JWTIndicatorType.UNEXPECTED_TYP in self.types
+
+    @property
+    def critical_header(self) -> bool:
+        return JWTIndicatorType.CRITICAL_HEADER in self.types
+
+    @property
+    def duplicate_claim_context(self) -> bool:
+        return JWTIndicatorType.DUPLICATE_CLAIM_CONTEXT in self.types
+
 
 class JWTAnalyzer:
     WEAK_ALGORITHMS = {
@@ -157,6 +237,10 @@ class JWTAnalyzer:
         expected_claims: set[str] | None = None,
         weak_algorithms: set[str] | None = None,
         long_lived_threshold: int = 86400,
+        current_time: int | float | None = None,
+        expected_issuer: str | None = None,
+        expected_audience: str | None = None,
+        expected_typ: str = "JWT",
     ) -> JWTAnalysis:
         indicators: list[JWTIndicator] = []
 
@@ -165,6 +249,27 @@ class JWTAnalyzer:
 
         if long_lived_threshold < 0:
             raise ValueError("long_lived_threshold must be >= 0")
+
+        if current_time is not None and not isinstance(
+            current_time,
+            (int, float),
+        ):
+            raise TypeError("current_time must be a number or None")
+
+        if expected_issuer is not None and not isinstance(
+            expected_issuer,
+            str,
+        ):
+            raise TypeError("expected_issuer must be a string or None")
+
+        if expected_audience is not None and not isinstance(
+            expected_audience,
+            str,
+        ):
+            raise TypeError("expected_audience must be a string or None")
+
+        if not isinstance(expected_typ, str):
+            raise TypeError("expected_typ must be a string")
 
         claims = claims or {}
         params = params or {}
@@ -264,10 +369,75 @@ class JWTAnalyzer:
                         value=token_algorithm,
                     )
 
+            token_type = header.get("typ")
+
+            if "typ" not in header:
+                add(
+                    JWTIndicatorType.MISSING_TYP,
+                    "JWT header does not contain a typ field.",
+                    name="typ",
+                )
+            elif not isinstance(token_type, str):
+                add(
+                    JWTIndicatorType.UNEXPECTED_TYP,
+                    "JWT typ header value is not a string.",
+                    name="typ",
+                    value=str(token_type),
+                )
+            elif expected_typ and token_type.lower() != expected_typ.lower():
+                add(
+                    JWTIndicatorType.UNEXPECTED_TYP,
+                    f"JWT typ does not match expected value: {expected_typ}.",
+                    name="typ",
+                    value=token_type,
+                )
+
+            for header_name, indicator_type in (
+                ("kid", JWTIndicatorType.KID_HEADER),
+                ("jku", JWTIndicatorType.JKU_HEADER),
+                ("x5u", JWTIndicatorType.X5U_HEADER),
+                ("jwk", JWTIndicatorType.JWK_HEADER),
+            ):
+                if header_name in header:
+                    add(
+                        indicator_type,
+                        f"JWT {header_name} header parameter is present.",
+                        name=header_name,
+                        value=str(header[header_name]),
+                    )
+
+            suspicious_headers = {
+                "jku",
+                "x5u",
+                "jwk",
+                "crit",
+            }
+
+            for header_name in header:
+                if header_name.lower() in suspicious_headers:
+                    add(
+                        JWTIndicatorType.SUSPICIOUS_HEADER,
+                        f"JWT contains security-sensitive header parameter: {header_name}.",
+                        name=header_name,
+                        value=str(header[header_name]),
+                    )
+
+            if "crit" in header:
+                add(
+                    JWTIndicatorType.CRITICAL_HEADER,
+                    "JWT critical header parameters are present.",
+                    name="crit",
+                    value=str(header["crit"]),
+                )
+
             inspect_claims(payload)
 
         def inspect_claims(payload: dict[str, object]) -> None:
             expected = expected_claims or set()
+
+            exp = payload.get("exp")
+            iat = payload.get("iat")
+            nbf = payload.get("nbf")
 
             if "exp" not in payload:
                 add(
@@ -275,21 +445,71 @@ class JWTAnalyzer:
                     "JWT does not contain an expiration claim.",
                     name="exp",
                 )
+            elif not isinstance(exp, (int, float)):
+                add(
+                    JWTIndicatorType.INVALID_EXPIRATION,
+                    "JWT expiration claim is not numeric.",
+                    name="exp",
+                    value=str(exp),
+                )
             else:
-                exp = payload.get("exp")
+                if current_time is not None and exp < current_time:
+                    add(
+                        JWTIndicatorType.EXPIRED_TOKEN,
+                        "JWT expiration time is earlier than the supplied current time.",
+                        name="exp",
+                        value=str(exp),
+                    )
 
-                if isinstance(exp, (int, float)):
-                    iat = payload.get("iat")
+                if isinstance(iat, (int, float)):
+                    lifetime = exp - iat
 
-                    if isinstance(iat, (int, float)):
-                        lifetime = exp - iat
-                        if lifetime > long_lived_threshold:
-                            add(
-                                JWTIndicatorType.LONG_LIVED_TOKEN,
-                                f"JWT lifetime exceeds threshold: {lifetime} seconds.",
-                                name="exp",
-                                value=str(exp),
-                            )
+                    if lifetime < 0:
+                        add(
+                            JWTIndicatorType.INVALID_EXPIRATION,
+                            "JWT expiration occurs before issued-at time.",
+                            name="exp",
+                            value=str(exp),
+                        )
+                    elif lifetime > long_lived_threshold:
+                        add(
+                            JWTIndicatorType.LONG_LIVED_TOKEN,
+                            f"JWT lifetime exceeds threshold: {lifetime} seconds.",
+                            name="exp",
+                            value=str(exp),
+                        )
+
+            if "iat" in payload:
+                if not isinstance(iat, (int, float)):
+                    add(
+                        JWTIndicatorType.INVALID_ISSUED_AT,
+                        "JWT issued-at claim is not numeric.",
+                        name="iat",
+                        value=str(iat),
+                    )
+                elif current_time is not None and iat > current_time:
+                    add(
+                        JWTIndicatorType.INVALID_ISSUED_AT,
+                        "JWT issued-at time is in the future.",
+                        name="iat",
+                        value=str(iat),
+                    )
+
+            if "nbf" in payload:
+                if not isinstance(nbf, (int, float)):
+                    add(
+                        JWTIndicatorType.INVALID_NOT_BEFORE,
+                        "JWT not-before claim is not numeric.",
+                        name="nbf",
+                        value=str(nbf),
+                    )
+                elif current_time is not None and nbf > current_time:
+                    add(
+                        JWTIndicatorType.NOT_YET_VALID_TOKEN,
+                        "JWT not-before time is later than the supplied current time.",
+                        name="nbf",
+                        value=str(nbf),
+                    )
 
             required_claims = {
                 "iss": JWTIndicatorType.MISSING_ISSUER,
@@ -305,6 +525,49 @@ class JWTAnalyzer:
                         f"JWT is missing expected claim: {claim_name}.",
                         name=claim_name,
                     )
+
+            issuer = payload.get("iss")
+            if "iss" in payload:
+                add(
+                    JWTIndicatorType.ISSUER_PRESENT,
+                    "JWT issuer claim is present.",
+                    name="iss",
+                    value=str(issuer),
+                )
+
+                if (
+                    expected_issuer is not None
+                    and issuer != expected_issuer
+                ):
+                    add(
+                        JWTIndicatorType.MISSING_ISSUER,
+                        "JWT issuer does not match the expected issuer.",
+                        name="iss",
+                        value=str(issuer),
+                    )
+
+            audience = payload.get("aud")
+            if "aud" in payload:
+                add(
+                    JWTIndicatorType.AUDIENCE_PRESENT,
+                    "JWT audience claim is present.",
+                    name="aud",
+                    value=str(audience),
+                )
+
+                if expected_audience is not None:
+                    if isinstance(audience, list):
+                        matches = expected_audience in audience
+                    else:
+                        matches = audience == expected_audience
+
+                    if not matches:
+                        add(
+                            JWTIndicatorType.MISSING_AUDIENCE,
+                            "JWT audience does not match the expected audience.",
+                            name="aud",
+                            value=str(audience),
+                        )
 
             for claim_name in payload:
                 if claim_name.lower() in self.SENSITIVE_CLAIMS:
