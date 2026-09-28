@@ -1,6 +1,7 @@
 from typing import Any
 
 from m_hunter.core.finding import Finding
+from m_hunter.findings.converter import FindingConverter
 
 
 class FindingAnalyzer:
@@ -21,7 +22,7 @@ class FindingAnalyzer:
         cwe: str | None = None,
         owasp: str | None = None,
     ) -> Finding:
-        return Finding(
+        return FindingConverter.create_from_fields(
             title=title,
             severity=severity,
             confidence=confidence,

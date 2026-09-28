@@ -8,6 +8,11 @@ from m_hunter.core.target import Target
 from m_hunter.scanners.base import BaseScanner
 from m_hunter.scanners.discovery import ScannerDiscovery
 from m_hunter.scanners.registry import ScannerRegistry
+from m_hunter.findings.converter import FindingProcessingResult
+from m_hunter.validation.analysis_pipeline import (
+    AnalysisFindingPipeline,
+    AnalysisValidator,
+)
 
 
 class ScanEngine:
@@ -16,6 +21,7 @@ class ScanEngine:
         registry: ScannerRegistry | None = None,
         *,
         analyzer_registry: AnalyzerRegistry | None = None,
+        finding_pipeline: AnalysisFindingPipeline | None = None,
         auto_discover: bool = True,
     ):
         if registry is None:
@@ -30,6 +36,7 @@ class ScanEngine:
             if analyzer_registry is not None
             else AnalyzerRegistry()
         )
+        self.finding_pipeline = finding_pipeline or AnalysisFindingPipeline()
 
     def create_scan(self, target_url: str) -> Scan:
         target = Target(target_url)
@@ -84,6 +91,23 @@ class ScanEngine:
             results[analyzer.name] = analyzer.run(context)
 
         return results
+
+    def validate_analysis(
+        self,
+        analysis: AnalysisResult,
+        context: AnalysisContext,
+        validator: AnalysisValidator,
+    ) -> FindingProcessingResult:
+        """Validate one analyzer result and convert an accepted issue.
+
+        This focused entry point connects analysis, validation, and Findings
+        without starting Recon, scanners, or a complete scan orchestration.
+        """
+        return self.finding_pipeline.process(
+            analysis,
+            context,
+            validator,
+        )
 
     def finish_scan(self, scan: Scan) -> None:
         scan.finish()
