@@ -11,6 +11,7 @@ from m_hunter.integrations.tools.runner import ToolRunner
 class ToolDefinition:
     name: str
     version_arguments: tuple[str, ...]
+    executable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class ToolStatus:
 TOOL_DEFINITIONS = (
     ToolDefinition("subfinder", ("-version",)),
     ToolDefinition("amass", ("-version",)),
-    ToolDefinition("httpx", ("-version",)),
+    ToolDefinition("httpx", ("-version",), executable="httpx-pd"),
     ToolDefinition("nmap", ("--version",)),
     ToolDefinition("ffuf", ("-V",)),
     ToolDefinition("nuclei", ("-version",)),
@@ -48,7 +49,14 @@ class ToolCatalog:
             raise ValueError(f"unsupported external tool: {name}")
         try:
             resolver = getattr(self.runner, "resolve", None)
-            executable = resolver(definition.name) if callable(resolver) else None
+            executable_name = definition.executable or definition.name
+            executable = resolver(executable_name) if callable(resolver) else None
+
+            # Keep the logical tool name stable for injected/test runners.
+            # Only use the alternate executable when it is actually resolvable.
+            if not executable and definition.executable and callable(resolver):
+                executable = resolver(definition.name)
+
             installed = bool(executable) if callable(resolver) else self.runner.is_available(definition.name)
             if not installed:
                 return ToolStatus(definition.name, "missing", False)
@@ -62,7 +70,26 @@ class ToolCatalog:
                     )
                     lines = (result.stdout or result.stderr).strip().splitlines()
                     if lines and not getattr(result, "timed_out", False):
-                        version = self._redactor.redact_text(lines[0])[:160]
+                        sanitized_lines = [
+                            self._redactor.redact_text(line).strip()
+                            for line in lines
+                            if line.strip()
+                        ]
+
+                        # Prefer an explicit version declaration when a tool
+                        # prints a banner before its version information.
+                        version_line = next(
+                            (
+                                line for line in sanitized_lines
+                                if "version:" in line.casefold()
+                            ),
+                            sanitized_lines[0],
+                        )
+
+                        if "version:" in version_line.casefold():
+                            version = version_line.split(":", 1)[1].strip()[:160]
+                        else:
+                            version = version_line[:160]
                 except Exception:
                     version = None
             return ToolStatus(
