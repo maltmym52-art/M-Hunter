@@ -32,6 +32,7 @@ from m_hunter.evidence.redaction import EvidenceRedactor
 from m_hunter.integrations.tools.runner import ToolRunner
 from m_hunter.recon.scope import ScopeManager
 from m_hunter.recon.url import URL
+from m_hunter.reporting import ReportError, ReportOutputError, ReportService
 from m_hunter.scanners.registry import ScannerRegistry
 from m_hunter.scanners.security_headers import SecurityHeadersScanner
 
@@ -157,35 +158,6 @@ def _response_from_json(path: Path, target: str) -> HttpResponse:
         raise typer.BadParameter(f"cannot read HTTP response JSON: {exc}") from exc
 
 
-def _safe_result(result: ScanExecutionResult, service: ApplicationService) -> dict[str, Any]:
-    findings = []
-    for finding in result.findings:
-        evidence_records = service.evidence_service.store.for_finding(finding)
-        evidence = [record.to_dict() for record in evidence_records]
-        findings.append({
-            "id": finding.id, "title": _safe_text(finding.title), "severity": _safe_text(finding.severity),
-            "confidence": _safe_text(finding.confidence), "target": _safe_text(finding.target),
-            "endpoint": _safe_text(finding.endpoint), "parameter": _safe_text(finding.parameter),
-            "description": _safe_text(finding.description),
-            # The evidence store is the authoritative sanitized export path.
-            "evidence": [_safe_text(record.sanitized.evidence) for record in evidence_records],
-            "evidence_ids": list(finding.evidence_ids), "evidence_records": evidence,
-            "remediation": _safe_text(finding.remediation), "cwe": _safe_text(finding.cwe),
-            "owasp": _safe_text(finding.owasp), "status": _safe_text(finding.status),
-        })
-    return {
-        "state": result.state.value,
-        "target": _safe_text(result.security.target if result.security else str(result.scan.target.url)),
-        "assets": [{"value": _safe_text(a.value), "type": a.asset_type,
-                    "source": _safe_text(a.source)} for a in result.assets],
-        "findings": findings,
-        "evidence_ids": list(result.evidence_ids),
-        "errors": [{"component": _safe_text(i.component), "stage": i.stage.value, "error": _safe_text(i.error), "level": i.level} for i in result.issues],
-        "statistics": vars(result.statistics),
-        "duration": _duration(result),
-    }
-
-
 def _duration(result: ScanExecutionResult) -> float:
     """Compute elapsed seconds from the application scan lifecycle timestamps."""
     started, finished = result.scan.started_at, result.scan.finished_at
@@ -221,28 +193,39 @@ def _render_result(result: ScanExecutionResult, service: ApplicationService, out
 
 
 def _finish_result(result: ScanExecutionResult, service: ApplicationService,
-                    out: Console, output: Path | None, output_format: str) -> None:
+                    out: Console, output: Path | None, output_format: str,
+                    overwrite: bool = False) -> None:
+    reports = ReportService()
+    report_model = reports.build(result, service.evidence_service)
     try:
         if output:
-            payload = _safe_result(result, service)
             if output_format == "json":
-                output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+                reports.write(report_model, "json", output, overwrite=overwrite)
             else:
-                output.write_text(_plain_summary(payload), encoding="utf-8")
+                _write_text(output, _plain_summary(report_model.to_dict()), overwrite=overwrite)
             out.print(f"Results saved to {output}")
         elif output_format == "json":
-            out.print_json(json.dumps(_safe_result(result, service), ensure_ascii=False))
+            out.print(reports.render(report_model, "json"), markup=False, highlight=False, end="")
         else:
             _render_result(result, service, out)
-    except OSError as exc:
+    except (OSError, ReportOutputError) as exc:
         out.print(f"[red]Output error:[/red] {exc}")
         raise typer.Exit(EXIT_OUTPUT)
 
 
 def _plain_summary(payload: dict[str, Any]) -> str:
-    return (f"M-Hunter scan: {payload['state']}\nTarget: {payload['target']}\n"
+    return (f"M-Hunter scan: {payload['scan']['status']}\nTarget: {payload['target']}\n"
             f"Assets: {len(payload['assets'])}\nFindings: {len(payload['findings'])}\n"
-            f"Evidence: {len(payload['evidence_ids'])}\n")
+            f"Evidence: {payload['statistics'].get('evidence_records', 0)}\n")
+
+
+def _write_text(path: Path, content: str, *, overwrite: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if overwrite:
+        path.write_text(content, encoding="utf-8")
+    else:
+        with path.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(content)
 
 
 def _check_selected_names(service: ApplicationService, analyzers: list[str],
@@ -283,6 +266,7 @@ def scan(
     external_tools: bool = typer.Option(False, "--external-tools/--no-external-tools", help="Enable optional external Recon integrations."),
     output_format: str = typer.Option("text", "--format", help="Output format: text or json.", case_sensitive=False),
     output: Path | None = typer.Option(None, "--output", help="Write results to this path."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing output file."),
     timeout: float = typer.Option(10.0, min=0.1, help="HTTP/tool timeout in seconds."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show extra scan diagnostics."),
 ) -> None:
@@ -308,7 +292,7 @@ def scan(
         include_example_scanner=include_example,
     )
     result = service.run(request)
-    _finish_result(result, service, out, output, output_format.lower())
+    _finish_result(result, service, out, output, output_format.lower(), overwrite)
     if verbose:
         out.print(f"Stages: {', '.join(f'{s.stage.value}={s.state.value}' for s in result.stages)}")
     _exit_for_result(result)
@@ -322,6 +306,7 @@ def recon(
     exclude_path: list[str] = typer.Option([], "--exclude-path", help="Path glob excluded from scope."),
     external_tools: bool = typer.Option(False, "--external-tools/--no-external-tools", help="Enable optional external Recon integrations."),
     output: Path | None = typer.Option(None, "--output", help="Write result JSON to this path."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing output file."),
     timeout: float = typer.Option(10.0, min=0.1),
 ) -> None:
     """Run passive asset discovery through the ApplicationService."""
@@ -333,7 +318,7 @@ def recon(
         raise typer.Exit(EXIT_INVALID)
     service = _service(ctx, timeout=timeout, scope=scope, external_tools=external_tools)
     result = service.run(ScanRequest(target, recon=True, run_scanners=False, run_analyzers=False))
-    _finish_result(result, service, out, output, "json" if output else "text")
+    _finish_result(result, service, out, output, "json" if output else "text", overwrite)
     _exit_for_result(result)
 
 
@@ -344,6 +329,7 @@ def analyze(
     input_file: Path = typer.Option(..., "--input", help="JSON file containing a previously collected HTTP response."),
     analyzer: list[str] = typer.Option([], "--analyzer", help="Analyzer name to run; repeatable."),
     output: Path | None = typer.Option(None, "--output", help="Write result JSON to this path."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing output file."),
     timeout: float = typer.Option(10.0, min=0.1),
 ) -> None:
     """Analyze a saved response without making network requests."""
@@ -364,7 +350,7 @@ def analyze(
         analyzer_names=tuple(analyzer) or None,
         supplied_responses={response.url: response},
     ))
-    _finish_result(result, service, out, output, "json" if output else "text")
+    _finish_result(result, service, out, output, "json" if output else "text", overwrite)
     _exit_for_result(result)
 
 
@@ -374,27 +360,33 @@ def report(
     input_file: Path = typer.Argument(..., help="Scan result JSON input."),
     output_format: str = typer.Option("json", "--format", help="Requested report format: json, markdown, or html."),
     output: Path | None = typer.Option(None, "--output", help="Report destination path."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing report file."),
 ) -> None:
-    """Report command contract; report generation is delivered in Stage 6."""
+    """Render a saved M-Hunter report as JSON, Markdown, or HTML."""
     out = _console(ctx)
     if output_format.lower() not in {"json", "markdown", "html"}:
         raise typer.BadParameter("format must be json, markdown, or html")
     if not input_file.is_file():
         out.print(f"[red]Report input does not exist:[/red] {input_file}")
         raise typer.Exit(EXIT_INVALID)
+    reports = ReportService()
     try:
-        data = json.loads(input_file.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("result JSON must contain an object")
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        report_model = reports.load(input_file)
+    except ReportError as exc:
         out.print(f"[red]Invalid report input:[/red] {exc}")
         raise typer.Exit(EXIT_INVALID)
-    report_request = ReportRequest(input_file, output_format.lower(), output)
-    if report_request.output_path:
-        out.print("[yellow]Report generation is not available until the Reporting stage.[/yellow]")
+    report_request = ReportRequest(input_file, output_format.lower(), output, overwrite)
+    try:
+        if report_request.output_path:
+            reports.write(report_model, report_request.format,
+                          report_request.output_path, overwrite=report_request.overwrite)
+            out.print(f"Report saved to {report_request.output_path}")
+        else:
+            out.print(reports.render(report_model, report_request.format),
+                      markup=False, highlight=False, end="")
+    except (ReportOutputError, OSError, ValueError) as exc:
+        out.print(f"[red]Report error:[/red] {exc}")
         raise typer.Exit(EXIT_OUTPUT)
-    out.print(f"Report request accepted: {input_file} ({output_format.lower()})")
-    out.print("[yellow]Generation contract is ready; report rendering arrives in Stage 6.[/yellow]")
 
 
 @app.command()

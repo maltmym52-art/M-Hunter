@@ -15,3 +15,4 @@ class ReportRequest:
     input_path: Path
     format: ReportFormat = "json"
     output_path: Path | None = None
+    overwrite: bool = False

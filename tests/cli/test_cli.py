@@ -191,10 +191,45 @@ def test_report_contract_and_missing_input(tmp_path):
     missing = runner.invoke(app, ["report", str(tmp_path / "missing.json")], obj=ctx())
     assert missing.exit_code == 2
     source = tmp_path / "scan.json"
-    source.write_text("{}", encoding="utf-8")
+    source.write_text(json.dumps({
+        "schema": "m-hunter-report", "schema_version": "1.0",
+        "scan": {"id": "scan-cli", "status": "completed", "started_at": None,
+                 "finished_at": None, "duration_seconds": 0},
+        "target": TARGET, "scope": {"in_scope": True}, "authorization": {},
+        "assets": [], "findings": [], "errors": [], "statistics": {}, "metadata": {},
+    }), encoding="utf-8")
     result = runner.invoke(app, ["report", str(source), "--format", "markdown"], obj=ctx())
     assert result.exit_code == 0
-    assert "Stage 6" in result.stdout
+    assert "No findings were reported" in result.stdout
+
+
+def test_report_command_writes_html_with_safe_overwrite_policy(tmp_path):
+    source = tmp_path / "scan.json"
+    source.write_text(json.dumps({
+        "schema": "m-hunter-report", "schema_version": "1.0",
+        "scan": {"id": "scan-cli", "status": "completed", "started_at": None,
+                 "finished_at": None, "duration_seconds": 0},
+        "target": TARGET, "scope": {}, "authorization": {}, "assets": [],
+        "findings": [], "errors": [], "statistics": {}, "metadata": {},
+    }), encoding="utf-8")
+    output = tmp_path / "reports" / "scan.html"
+    result = runner.invoke(app, ["report", str(source), "--format", "html", "--output", str(output)], obj=ctx())
+    assert result.exit_code == 0
+    assert "<!doctype html>" in output.read_text(encoding="utf-8")
+    blocked = runner.invoke(app, ["report", str(source), "--format", "json", "--output", str(output)], obj=ctx())
+    assert blocked.exit_code == 5
+    replaced = runner.invoke(app, ["report", str(source), "--format", "markdown",
+                                   "--output", str(output), "--overwrite"], obj=ctx())
+    assert replaced.exit_code == 0
+    assert output.read_text(encoding="utf-8").startswith("# M-Hunter")
+
+
+def test_report_command_rejects_malformed_schema(tmp_path):
+    source = tmp_path / "malformed.json"
+    source.write_text("{}", encoding="utf-8")
+    result = runner.invoke(app, ["report", str(source)], obj=ctx())
+    assert result.exit_code == 2
+    assert "unsupported report schema" in result.stdout
 
 
 def test_example_scanner_is_not_registered_by_default():
