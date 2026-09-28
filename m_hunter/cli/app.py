@@ -30,6 +30,10 @@ from m_hunter.core.http import HttpEngine
 from m_hunter.core.response import HttpResponse
 from m_hunter.evidence.redaction import EvidenceRedactor
 from m_hunter.integrations.tools.runner import ToolRunner
+from m_hunter.integrations.tools.catalog import ToolCatalog
+from m_hunter.integrations.tools.recon_sources import (
+    AmassSource, FfufSource, HttpxSource, NmapSource, NucleiSource,
+)
 from m_hunter.recon.scope import ScopeManager
 from m_hunter.recon.url import URL
 from m_hunter.reporting import ReportError, ReportOutputError, ReportService
@@ -38,6 +42,7 @@ from m_hunter.scanners.security_headers import SecurityHeadersScanner
 
 
 TOOLS = ("subfinder", "amass", "httpx", "nmap", "ffuf", "nuclei")
+RECON_SOURCES = TOOLS
 _REDACTOR = EvidenceRedactor()
 EXIT_INVALID = 2
 EXIT_UNAUTHORIZED = 3
@@ -56,12 +61,28 @@ class CLIContext:
 
 
 def _make_service(*, timeout: float, scope_manager: ScopeManager,
-                  external_tools: bool, tool_runner: ToolRunner | None = None) -> ApplicationService:
+                  external_tools: bool, tool_runner: ToolRunner | None = None,
+                  recon_source_names: tuple[str, ...] | None = None,
+                  wordlist: Path | None = None) -> ApplicationService:
     runner = tool_runner or ToolRunner(default_timeout=timeout)
     recon_sources: list[object] = []
-    if external_tools:
+    selected_sources = recon_source_names
+    if selected_sources is None and external_tools:
+        selected_sources = ("subfinder", "amass")
+    if selected_sources:
         from m_hunter.integrations.tools.subfinder import SubfinderSource
-        recon_sources.append(SubfinderSource(runner=runner, timeout=timeout))
+        source_factories = {
+            "subfinder": lambda: SubfinderSource(runner=runner, timeout=timeout),
+            "amass": lambda: AmassSource(runner, timeout=timeout),
+            "httpx": lambda: HttpxSource(runner, timeout=timeout),
+            "nmap": lambda: NmapSource(runner, timeout=timeout),
+            "ffuf": lambda: FfufSource(runner, timeout=timeout, wordlist=wordlist),
+            "nuclei": lambda: NucleiSource(runner, timeout=timeout),
+        }
+        unknown = set(selected_sources) - source_factories.keys()
+        if unknown:
+            raise ValueError(f"unknown Recon source(s): {', '.join(sorted(unknown))}")
+        recon_sources.extend(source_factories[name]() for name in dict.fromkeys(selected_sources))
     analyzers = AnalyzerRegistry()
     analyzers.register(SecurityHeadersAnalyzer())
     analyzers.register(MetadataAnalyzer())
@@ -104,15 +125,19 @@ def _console(ctx: typer.Context) -> Console:
 
 
 def _service(ctx: typer.Context, *, timeout: float, scope: ScopeManager,
-             external_tools: bool) -> ApplicationService:
+             external_tools: bool,
+             recon_source_names: tuple[str, ...] | None = None,
+             wordlist: Path | None = None) -> ApplicationService:
     deps = _ctx(ctx)
     factory = deps.application_service_factory
     if factory is not None:
         return factory(timeout=timeout, scope_manager=scope,
-                       external_tools=external_tools, tool_runner=deps.tool_runner)
+                       external_tools=external_tools, tool_runner=deps.tool_runner,
+                       recon_source_names=recon_source_names, wordlist=wordlist)
     return _make_service(timeout=timeout, scope_manager=scope,
                          external_tools=external_tools,
-                         tool_runner=deps.tool_runner)
+                         tool_runner=deps.tool_runner,
+                         recon_source_names=recon_source_names, wordlist=wordlist)
 
 
 @app.callback()
@@ -240,6 +265,17 @@ def _check_selected_names(service: ApplicationService, analyzers: list[str],
         raise typer.Exit(EXIT_INVALID)
 
 
+def _validate_recon_sources(names: list[str], wordlist: Path | None,
+                            out: Console) -> None:
+    unknown = sorted(set(names) - set(RECON_SOURCES))
+    if unknown:
+        out.print(f"[red]Unknown Recon source(s):[/red] {', '.join(unknown)}")
+        raise typer.Exit(EXIT_INVALID)
+    if "ffuf" in names and (wordlist is None or not wordlist.is_file()):
+        out.print("[red]Selecting ffuf requires an existing --wordlist file.[/red]")
+        raise typer.Exit(EXIT_INVALID)
+
+
 def _exit_for_result(result: ScanExecutionResult) -> None:
     if result.state == ScanState.FAILED:
         if result.security and not result.security.in_scope:
@@ -261,6 +297,8 @@ def scan(
     exclude_path: list[str] = typer.Option([], "--exclude-path", help="Path glob excluded from scope; repeatable."),
     analyzer: list[str] = typer.Option([], "--analyzer", help="Analyzer name to run; repeatable."),
     scanner: list[str] = typer.Option([], "--scanner", help="Scanner name to run; repeatable."),
+    recon_source: list[str] = typer.Option([], "--recon-source", help="Optional Recon tool/source to run; repeatable."),
+    wordlist: Path | None = typer.Option(None, "--wordlist", help="Required by ffuf; used only when ffuf is explicitly selected."),
     include_example: bool = typer.Option(False, "--include-example", help="Explicitly opt in to the example scanner."),
     recon: bool = typer.Option(False, "--recon/--no-recon", help="Run configured Recon sources."),
     external_tools: bool = typer.Option(False, "--external-tools/--no-external-tools", help="Enable optional external Recon integrations."),
@@ -277,18 +315,24 @@ def scan(
     if active and not (authorization_reference and authorization_reference.strip()):
         out.print("[red]Active scans require --authorization-reference.[/red]")
         raise typer.Exit(EXIT_UNAUTHORIZED)
+    _validate_recon_sources(recon_source, wordlist, out)
+    if recon_source and not recon:
+        out.print("[red]Use --recon when selecting --recon-source.[/red]")
+        raise typer.Exit(EXIT_INVALID)
     try:
         scope = _scope(target, allow_host, exclude_path)
     except (TypeError, ValueError) as exc:
         out.print(f"[red]Invalid target or scope:[/red] {exc}")
         raise typer.Exit(EXIT_INVALID)
-    service = _service(ctx, timeout=timeout, scope=scope, external_tools=external_tools)
+    service = _service(ctx, timeout=timeout, scope=scope, external_tools=external_tools,
+                       recon_source_names=tuple(recon_source) or None, wordlist=wordlist)
     _check_selected_names(service, analyzer, scanner, out)
     request = ScanRequest(
         target=target, active=active,
         authorization=AuthorizationGrant(active, authorization_reference if active else None),
         recon=recon, scanner_names=tuple(scanner) or None,
         analyzer_names=tuple(analyzer) or None,
+        recon_source_names=tuple(recon_source) or None,
         include_example_scanner=include_example,
     )
     result = service.run(request)
@@ -304,20 +348,35 @@ def recon(
     target: str = typer.Argument(..., help="HTTP(S) URL to discover assets for."),
     allow_host: list[str] = typer.Option([], "--allow-host", help="Additional exact hostname in scope."),
     exclude_path: list[str] = typer.Option([], "--exclude-path", help="Path glob excluded from scope."),
-    external_tools: bool = typer.Option(False, "--external-tools/--no-external-tools", help="Enable optional external Recon integrations."),
+    source: list[str] = typer.Option([], "--source", help="Recon source to run; repeatable. Without selection, passive Subfinder and Amass are used."),
+    active: bool = typer.Option(False, "--active/--passive", help="Enable explicitly selected active tools."),
+    authorization_reference: str | None = typer.Option(None, "--authorization-reference", help="Required authorization reference for active tools."),
+    wordlist: Path | None = typer.Option(None, "--wordlist", help="Required when selecting ffuf."),
+    external_tools: bool = typer.Option(True, "--external-tools/--no-external-tools", help="Use optional external Recon tools (passive defaults only)."),
     output: Path | None = typer.Option(None, "--output", help="Write result JSON to this path."),
     overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing output file."),
     timeout: float = typer.Option(10.0, min=0.1),
 ) -> None:
     """Run passive asset discovery through the ApplicationService."""
     out = _console(ctx)
+    if active and not (authorization_reference and authorization_reference.strip()):
+        out.print("[red]Active Recon requires --authorization-reference.[/red]")
+        raise typer.Exit(EXIT_UNAUTHORIZED)
+    _validate_recon_sources(source, wordlist, out)
     try:
         scope = _scope(target, allow_host, exclude_path)
     except (TypeError, ValueError) as exc:
         out.print(f"[red]Invalid target or scope:[/red] {exc}")
         raise typer.Exit(EXIT_INVALID)
-    service = _service(ctx, timeout=timeout, scope=scope, external_tools=external_tools)
-    result = service.run(ScanRequest(target, recon=True, run_scanners=False, run_analyzers=False))
+    selected = tuple(source) or None
+    service = _service(ctx, timeout=timeout, scope=scope, external_tools=external_tools,
+                       recon_source_names=selected, wordlist=wordlist)
+    result = service.run(ScanRequest(
+        target, recon=True, active=active,
+        authorization=AuthorizationGrant(active, authorization_reference if active else None),
+        run_scanners=False, run_analyzers=False,
+        recon_source_names=selected,
+    ))
     _finish_result(result, service, out, output, "json" if output else "text", overwrite)
     _exit_for_result(result)
 
@@ -394,22 +453,10 @@ def tools(ctx: typer.Context) -> None:
     """Show availability and version of optional external tools."""
     runner = _ctx(ctx).tool_runner or ToolRunner()
     out = _console(ctx)
-    table = Table("Tool", "Status", "Version")
-    for name in TOOLS:
-        try:
-            available = runner.is_available(name)
-            version = "—"
-            if available:
-                try:
-                    value = runner.run([name, "--version"], timeout=3.0)
-                    text = (value.stdout or value.stderr).strip().splitlines()
-                    if text:
-                        version = text[0][:160]
-                except Exception:
-                    version = "unknown"
-            table.add_row(name, "installed" if available else "missing", version)
-        except Exception:
-            table.add_row(name, "unknown", "unknown")
+    table = Table("Tool", "Status", "Executable", "Version")
+    for status in ToolCatalog(runner).detect_all():
+        version = status.version or ("unknown" if status.installed else "—")
+        table.add_row(status.name, status.status, status.executable or "—", version)
     out.print(table)
 
 

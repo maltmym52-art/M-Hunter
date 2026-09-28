@@ -34,12 +34,16 @@ class ToolRunner:
         self.default_timeout = default_timeout
 
     def is_available(self, executable: str) -> bool:
+        return self.resolve(executable) is not None
+
+    def resolve(self, executable: str) -> str | None:
+        """Return the resolved executable path without executing it."""
         if not executable.strip():
             raise ValueError(
                 "executable must not be empty"
             )
 
-        return shutil.which(executable) is not None
+        return shutil.which(executable)
 
     def run(
         self,

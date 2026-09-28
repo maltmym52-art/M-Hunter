@@ -58,7 +58,7 @@ class ReportModel:
             {"active_enabled", "granted", "reference_present"}, safe,
         ))
         object.__setattr__(self, "assets", tuple(
-            _allow(item, {"value", "type", "source"}, safe) for item in self.assets
+            _allow(item, {"value", "type", "source", "metadata"}, safe) for item in self.assets
         ))
         finding_fields = {
             "id", "title", "severity", "confidence", "target", "endpoint",

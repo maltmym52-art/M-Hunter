@@ -65,6 +65,7 @@ class ScanRequest:
     run_analyzers: bool = True
     scanner_names: tuple[str, ...] | None = None
     analyzer_names: tuple[str, ...] | None = None
+    recon_source_names: tuple[str, ...] | None = None
     include_example_scanner: bool = False
     supplied_responses: Mapping[str, HttpResponse] = field(default_factory=dict)
     cancel_event: Event | None = None
@@ -78,6 +79,11 @@ class ScanRequest:
         self.target = self.target.strip()
         self.supplied_responses = dict(self.supplied_responses)
         self.metadata = dict(self.metadata)
+        if self.recon_source_names is not None:
+            names = tuple(str(name).strip() for name in self.recon_source_names)
+            if any(not name for name in names):
+                raise ValueError("recon source names must not be empty")
+            self.recon_source_names = tuple(dict.fromkeys(names))
 
 
 @dataclass(frozen=True)

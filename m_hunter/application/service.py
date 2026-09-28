@@ -243,20 +243,38 @@ class ApplicationService:
             self._stage(result, ScanStage.RECON, StageState.SKIPPED)
             result.statistics.assets_discovered = len(result.assets)
             return
-        sources = self.recon_pipeline.discovery.get_sources()
+        registered_sources = self.recon_pipeline.discovery.get_sources()
+        requested_names = request.recon_source_names
+        by_name = {getattr(source, "name", source.__class__.__name__): source
+                   for source in registered_sources}
+        if requested_names is None:
+            # Safe scans run passive sources only; explicit active mode opts
+            # into configured active sources for backwards-compatible callers.
+            sources = [source for source in registered_sources
+                       if self._recon_mode(source) == "passive"
+                       or (request.active and self._recon_mode(source) == "active")]
+        else:
+            sources = []
+            for name in requested_names:
+                source = by_name.get(name)
+                if source is None:
+                    self._issue(result, name, ScanStage.RECON,
+                                f"unknown Recon source: {name}", target=target_url)
+                    continue
+                sources.append(source)
         try:
             passive_sources = []
             active_sources = []
             for source in sources:
-                passive = bool(getattr(source, "passive", False))
+                passive = self._recon_mode(source) == "passive"
                 if not passive and not request.active:
                     self._issue(
                         result,
                         getattr(source, "name", source.__class__.__name__),
                         ScanStage.RECON,
-                        "active recon source skipped because active testing is disabled",
+                        "active Recon source requires explicit active mode and authorization",
                         target=target_url,
-                        level="warning",
+                        level="error",
                     )
                     continue
                 if not passive and not callable(getattr(source, "discover_scoped", None)):
@@ -269,8 +287,11 @@ class ApplicationService:
                         level="warning",
                     )
                     continue
-                tool_name = getattr(source, "name", "").casefold()
+                capabilities = getattr(source, "capabilities", None)
+                tool_name = getattr(capabilities, "required_binary", None) or getattr(source, "name", "").casefold()
                 if tool_name in {"subfinder", "amass", "httpx", "nmap", "ffuf", "nuclei"} and not self.tool_runner.is_available(tool_name):
+                    if hasattr(source, "last_status"):
+                        source.last_status = "missing"
                     self._issue(
                         result,
                         tool_name,
@@ -300,6 +321,8 @@ class ApplicationService:
                         target=target_url,
                     )
                 discovered.extend(recon.discovered)
+                if not recon.errors:
+                    self._record_source_status(source, result, target_url)
 
             guarded_http = ScopedHttpEngine(
                 self.http_engine,
@@ -322,10 +345,12 @@ class ApplicationService:
                             target_url,
                             scope_manager=scope,
                             authorization=request.authorization,
+                            active_enabled=request.active,
                             http_engine=guarded_http,
                             tool_runner=guarded_tools,
                         )
                     )
+                    self._record_source_status(source, result, target_url)
                 except Exception as exc:
                     self._issue(result, source.name, ScanStage.RECON, str(exc), target=target_url)
                 finally:
@@ -357,6 +382,30 @@ class ApplicationService:
             ScanStage.RECON,
             StageState.PARTIAL if result.errors else StageState.COMPLETED,
         )
+
+    @staticmethod
+    def _recon_mode(source: object) -> str:
+        capabilities = getattr(source, "capabilities", None)
+        mode = getattr(capabilities, "mode", None)
+        if mode in {"passive", "active"}:
+            return mode
+        return "passive" if bool(getattr(source, "passive", False)) else "active"
+
+    def _record_source_status(
+        self,
+        source: object,
+        result: ScanExecutionResult,
+        target: str,
+    ) -> None:
+        status = getattr(source, "last_status", None)
+        if status in {"timeout", "failed", "malformed"}:
+            self._issue(
+                result,
+                getattr(source, "name", source.__class__.__name__),
+                ScanStage.RECON,
+                f"Recon source execution status: {status}",
+                target=target,
+            )
 
     def _collect_http(
         self,

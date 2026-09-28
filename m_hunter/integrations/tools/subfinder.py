@@ -1,6 +1,11 @@
+from datetime import datetime, timezone
+import json
+import re
+from urllib.parse import urlparse
+
 from m_hunter.integrations.tools.runner import ToolResult, ToolRunner
 from m_hunter.recon.asset import Asset
-from m_hunter.recon.discovery import DiscoverySource
+from m_hunter.recon.discovery import DiscoverySource, ReconCapabilities
 
 
 class SubfinderSource(DiscoverySource):
@@ -8,6 +13,7 @@ class SubfinderSource(DiscoverySource):
 
     name = "subfinder"
     passive = True
+    description = "Passive subdomain enumeration through ProjectDiscovery Subfinder."
 
     def __init__(
         self,
@@ -16,6 +22,17 @@ class SubfinderSource(DiscoverySource):
     ):
         self.runner = runner or ToolRunner()
         self.timeout = timeout
+        self.last_status = "not_run"
+        self.last_run_at: str | None = None
+        self.last_command: tuple[str, ...] = ()
+
+    @property
+    def capabilities(self) -> ReconCapabilities:
+        return ReconCapabilities(
+            mode="passive", requires_authorization=False,
+            supported_target_types=("domain", "url"), required_binary="subfinder",
+            timeout=self.timeout, description=self.description,
+        )
 
     def discover(self, target: str) -> list[Asset]:
         target = target.strip()
@@ -25,17 +42,21 @@ class SubfinderSource(DiscoverySource):
                 "target must not be empty"
             )
 
+        parsed = urlparse(target if "://" in target else f"https://{target}")
+        target_host = parsed.hostname
+        if not target_host:
+            raise ValueError("target must contain a valid host")
+        arguments = ["-d", target_host, "-silent"]
+        self.last_command = ("subfinder", *arguments)
+        self.last_run_at = datetime.now(timezone.utc).isoformat()
         result = self.runner.run_if_available(
             "subfinder",
-            [
-                "-d",
-                target,
-                "-silent",
-            ],
+            arguments,
             timeout=self.timeout,
         )
 
         if result is None:
+            self.last_status = "missing"
             return []
 
         return self._parse_result(result)
@@ -45,9 +66,11 @@ class SubfinderSource(DiscoverySource):
         result: ToolResult,
     ) -> list[Asset]:
         if result.timed_out:
+            self.last_status = "timeout"
             return []
 
         if result.return_code != 0:
+            self.last_status = "failed"
             return []
 
         assets: list[Asset] = []
@@ -63,15 +86,27 @@ class SubfinderSource(DiscoverySource):
 
             if not value or value in seen:
                 continue
+            if "://" in value or not self._valid_hostname(value):
+                continue
 
             seen.add(value)
 
-            assets.append(
-                Asset(
-                    value=value,
-                    asset_type="subdomain",
-                    source=self.name,
-                )
-            )
+            assets.append(Asset(
+                value=value, asset_type="subdomain", source=self.name,
+                metadata={"tool": self.name, "observed_at": self.last_run_at or "",
+                          "command": json.dumps(self.last_command)},
+            ))
+
+        self.last_status = "completed" if assets else "empty"
 
         return assets
+
+    @staticmethod
+    def _valid_hostname(value: str) -> bool:
+        if len(value) > 253 or not value or ".." in value:
+            return False
+        return all(
+            1 <= len(label) <= 63
+            and re.fullmatch(r"(?i)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in value.rstrip(".").split(".")
+        )

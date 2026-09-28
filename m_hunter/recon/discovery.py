@@ -1,7 +1,27 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Literal
 
 from m_hunter.recon.asset import Asset
 from m_hunter.recon.inventory import AssetInventory
+
+
+@dataclass(frozen=True)
+class ReconCapabilities:
+    """Declared execution and input requirements for a Recon source."""
+
+    mode: Literal["passive", "active"]
+    requires_authorization: bool
+    supported_target_types: tuple[str, ...]
+    required_binary: str | None
+    timeout: float | None
+    description: str
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"passive", "active"}:
+            raise ValueError("Recon mode must be passive or active")
+        if self.mode == "active" and not self.requires_authorization:
+            raise ValueError("active Recon sources must require authorization")
 
 
 class DiscoverySource(ABC):
@@ -10,6 +30,19 @@ class DiscoverySource(ABC):
     name: str = "base"
     passive: bool = False
     scope_aware: bool = False
+
+    @property
+    def capabilities(self) -> ReconCapabilities:
+        """Backward-compatible inferred capability for legacy discovery sources."""
+        passive = bool(getattr(self, "passive", False))
+        return ReconCapabilities(
+            mode="passive" if passive else "active",
+            requires_authorization=not passive,
+            supported_target_types=("domain", "url"),
+            required_binary=None,
+            timeout=None,
+            description=getattr(self, "description", self.__class__.__name__),
+        )
 
     @abstractmethod
     def discover(self, target: str) -> list[Asset]:

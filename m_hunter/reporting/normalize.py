@@ -78,7 +78,8 @@ class ReportNormalizer:
             str(item["id"]),
         ))
         assets = [{"value": self._text(asset.value), "type": asset.asset_type,
-                   "source": self._text(asset.source)} for asset in result.assets]
+                   "source": self._text(asset.source),
+                   "metadata": self._safe_value(asset.metadata)} for asset in result.assets]
         assets.sort(key=lambda item: (item["type"], item["value"] or "", item["source"] or ""))
         errors = [{
             "component": self._text(issue.component),
