@@ -85,52 +85,33 @@ class ToolRunner:
             shell=False,
         )
 
-        stdout_chunks: list[bytes] = []
-        stderr_chunks: list[bytes] = []
-
-        def read_stream(
-            stream,
-            chunks: list[bytes],
-        ) -> None:
-            while True:
-                chunk = stream.read(4096)
-
-                if not chunk:
-                    break
-
-                chunks.append(chunk)
-
-        stdout_thread = threading.Thread(
-            target=read_stream,
-            args=(process.stdout, stdout_chunks),
-            daemon=True,
-        )
-        stderr_thread = threading.Thread(
-            target=read_stream,
-            args=(process.stderr, stderr_chunks),
-            daemon=True,
-        )
-
-        stdout_thread.start()
-        stderr_thread.start()
-
         timed_out = False
 
         try:
-            process.wait(timeout=resolved_timeout)
+            stdout, stderr = process.communicate(
+                timeout=resolved_timeout
+            )
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             timed_out = True
-            process.kill()
-            process.wait()
 
-        stdout_thread.join()
-        stderr_thread.join()
+            process.kill()
+
+            remaining_stdout, remaining_stderr = process.communicate()
+
+            stdout = (
+                exc.output or b""
+            ) + (
+                remaining_stdout or b""
+            )
+
+            stderr = (
+                exc.stderr or b""
+            ) + (
+                remaining_stderr or b""
+            )
 
         duration = time.perf_counter() - start
-
-        stdout = b"".join(stdout_chunks)
-        stderr = b"".join(stderr_chunks)
 
         return ToolResult(
             command=normalized_command,
