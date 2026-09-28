@@ -30,10 +30,17 @@ from m_hunter.core.request import HttpRequest
 from m_hunter.core.scan import Scan
 from m_hunter.core.target import Target
 from m_hunter.evidence.service import EvidenceService
+from m_hunter.evidence.redaction import EvidenceRedactor
+from m_hunter.events.scan import (
+    AssetDiscovered, ErrorOccurred, FindingCreated, RequestCompleted,
+    ScanCancelled, ScanCompleted, ScanEventBus, ScanStarted, StageStarted,
+    StageUpdated,
+)
 from m_hunter.findings.converter import (
     FindingProcessingStatus,
 )
 from m_hunter.integrations.tools.runner import ToolRunner
+from m_hunter.integrations.tools.catalog import ToolCatalog
 from m_hunter.recon.asset import Asset
 from m_hunter.recon.discovery import DiscoveryEngine
 from m_hunter.recon.pipeline import ReconPipeline
@@ -67,6 +74,7 @@ class ApplicationService:
         validators: Mapping[str, object] | None = None,
         finding_pipeline: AnalysisFindingPipeline | None = None,
         engine: ScanEngine | None = None,
+        event_bus: ScanEventBus | None = None,
     ) -> None:
         inherited_http = getattr(engine, "http_engine", None) if engine is not None else None
         inherited_runner = getattr(engine, "tool_runner", None) if engine is not None else None
@@ -85,6 +93,8 @@ class ApplicationService:
         self._scope_manager = scope_manager
         self.validators = {**default_security_validators(), **dict(validators or {})}
         self._scanner_lock = RLock()
+        self.event_bus = event_bus or ScanEventBus()
+        self._event_redactor = EvidenceRedactor()
 
         self.scanner_registry = (
             scanner_registry if scanner_registry is not None
@@ -143,6 +153,7 @@ class ApplicationService:
         result = ScanExecutionResult(scan=scan)
         result.state = ScanState.RUNNING
         scan.start()
+        self._publish(ScanStarted, result, message="scan started")
 
         try:
             self._stage(result, ScanStage.SCOPE, StageState.RUNNING)
@@ -240,6 +251,8 @@ class ApplicationService:
     ) -> None:
         self._stage(result, ScanStage.RECON, StageState.RUNNING)
         result.assets.append(Asset(target_url, "url", source="target"))
+        self._publish(AssetDiscovered, result, stage=ScanStage.RECON.value,
+                      message="target")
         if not request.recon:
             self._stage(result, ScanStage.RECON, StageState.SKIPPED)
             result.statistics.assets_discovered = len(result.assets)
@@ -364,6 +377,8 @@ class ApplicationService:
                 url = asset_url(asset.value, target_url)
                 if is_in_scope(scope, url):
                     result.assets.append(asset)
+                    self._publish(AssetDiscovered, result, stage=ScanStage.RECON.value,
+                                  message=asset.asset_type)
                 else:
                     self._issue(
                         result,
@@ -436,6 +451,9 @@ class ApplicationService:
             self._stage(result, ScanStage.HTTP, StageState.COMPLETED if responses else StageState.SKIPPED)
             result.responses.update(responses)
             result.statistics.http_responses = len(result.responses)
+            for _endpoint in responses:
+                self._publish(RequestCompleted, result, stage=ScanStage.HTTP.value,
+                              message="HTTP response available")
             return dict(result.responses)
 
         client = ScopedHttpEngine(
@@ -463,6 +481,9 @@ class ApplicationService:
         result.statistics.http_requests += client.request_count
         result.responses.update(responses)
         self._merge_observations(result, client)
+        for _endpoint in responses:
+            self._publish(RequestCompleted, result, stage=ScanStage.HTTP.value,
+                          message="HTTP response available")
         self._stage(
             result,
             ScanStage.HTTP,
@@ -657,6 +678,8 @@ class ApplicationService:
                         result.statistics.analyses_validated += 1
                         if processing.status == FindingProcessingStatus.CREATED and processing.finding:
                             result.findings.append(processing.finding)
+                            self._publish(FindingCreated, result, stage=ScanStage.VALIDATION.value,
+                                          message=processing.finding.id)
                         elif processing.status == FindingProcessingStatus.DUPLICATE:
                             result.statistics.duplicates += 1
                         elif processing.status in {FindingProcessingStatus.VALIDATION_FAILED,
@@ -739,6 +762,10 @@ class ApplicationService:
             record.started_at = now
         if state not in {StageState.PENDING, StageState.RUNNING}:
             record.finished_at = now
+        event_type = StageStarted if state == StageState.RUNNING else StageUpdated
+        self._publish(event_type, result, stage=stage.value,
+                      progress=round((list(ScanStage).index(stage) + (0.0 if state == StageState.RUNNING else 1.0)) / len(ScanStage), 3),
+                      message=state.value)
 
     def _issue(
         self,
@@ -762,6 +789,22 @@ class ApplicationService:
                 level=level,
             )
         )
+        self._publish(ErrorOccurred, result, stage=stage.value,
+                      message=f"{component}: {error}")
+
+    def _publish(self, event_type: type, result: ScanExecutionResult, *,
+                 stage: str | None = None, progress: float | None = None,
+                 message: str | None = None) -> None:
+        """Publish a redacted progress event; observers cannot affect the scan."""
+        target = (result.security.target if result.security else str(result.scan.target.url))
+        safe_target = self._event_redactor.redact_text(target)
+        safe_message = self._event_redactor.redact_text(message) if message else None
+        self.event_bus.publish(event_type(
+            scan_id=result.scan.id, target=safe_target, stage=stage,
+            progress=progress, discovered_assets=len(result.assets),
+            findings_count=len(result.findings), errors_count=len(result.errors),
+            message=safe_message,
+        ))
 
     @staticmethod
     def _cancelled(request: ScanRequest) -> bool:
@@ -786,6 +829,9 @@ class ApplicationService:
                 if stage.state in {StageState.PENDING, StageState.RUNNING}:
                     stage.state = StageState.CANCELLED
                     stage.finished_at = datetime.now(timezone.utc)
+            self._publish(ScanCancelled, result, progress=1.0, message=state.value)
+        else:
+            self._publish(ScanCompleted, result, progress=1.0, message=state.value)
         return result
 
     def close(self) -> None:
@@ -794,6 +840,20 @@ class ApplicationService:
             close = getattr(self.http_engine, "close", None)
             if callable(close):
                 close()
+
+    def tools_status(self, *, include_version: bool = True) -> list[dict[str, object]]:
+        """Return optional tool status through the shared ToolRunner boundary."""
+        return [
+            {
+                "name": item.name,
+                "status": item.status,
+                "installed": item.installed,
+                "executable": item.executable,
+                "version": item.version,
+                "error": item.error,
+            }
+            for item in ToolCatalog(self.tool_runner).detect_all(include_version=include_version)
+        ]
 
     def __enter__(self) -> "ApplicationService":
         return self

@@ -27,6 +27,9 @@ from m_hunter.application import (
     ApplicationService, AuthorizationGrant, ScanExecutionResult,
     ScanRequest, ScanState,
 )
+from m_hunter.application.factory import (
+    create_default_application_service, default_scanner_registry,
+)
 from m_hunter.config.settings import HttpSettings
 from m_hunter.cli.contracts import ReportRequest
 from m_hunter.core.http import HttpEngine
@@ -67,46 +70,16 @@ def _make_service(*, timeout: float, scope_manager: ScopeManager,
                   external_tools: bool, tool_runner: ToolRunner | None = None,
                   recon_source_names: tuple[str, ...] | None = None,
                   wordlist: Path | None = None) -> ApplicationService:
-    runner = tool_runner or ToolRunner(default_timeout=timeout)
-    recon_sources: list[object] = []
-    selected_sources = recon_source_names
-    if selected_sources is None and external_tools:
-        selected_sources = ("subfinder", "amass")
-    if selected_sources:
-        from m_hunter.integrations.tools.subfinder import SubfinderSource
-        source_factories = {
-            "subfinder": lambda: SubfinderSource(runner=runner, timeout=timeout),
-            "amass": lambda: AmassSource(runner, timeout=timeout),
-            "httpx": lambda: HttpxSource(runner, timeout=timeout),
-            "nmap": lambda: NmapSource(runner, timeout=timeout),
-            "ffuf": lambda: FfufSource(runner, timeout=timeout, wordlist=wordlist),
-            "nuclei": lambda: NucleiSource(runner, timeout=timeout),
-        }
-        unknown = set(selected_sources) - source_factories.keys()
-        if unknown:
-            raise ValueError(f"unknown Recon source(s): {', '.join(sorted(unknown))}")
-        recon_sources.extend(source_factories[name]() for name in dict.fromkeys(selected_sources))
-    analyzers = AnalyzerRegistry()
-    analyzers.register(SecurityHeadersAnalyzer())
-    analyzers.register(MetadataAnalyzer())
-    analyzers.register(SecurityHeadersBaselineAnalyzer())
-    analyzers.register(HttpCookieSecurityAnalyzer())
-    analyzers.register(CacheControlSecurityAnalyzer())
-    return ApplicationService(
-        http_engine=HttpEngine(HttpSettings(timeout=timeout)),
-        tool_runner=runner,
-        recon_sources=recon_sources,
-        scanner_registry=_default_scanners(),
-        analyzer_registry=analyzers,
-        scope_manager=scope_manager,
+    return create_default_application_service(
+        timeout=timeout, scope_manager=scope_manager,
+        external_tools=external_tools, tool_runner=tool_runner,
+        recon_source_names=recon_source_names, wordlist=wordlist,
     )
 
 
 def _default_scanners() -> ScannerRegistry:
     """Return supported built-in scanners, deliberately excluding ExampleScanner."""
-    registry = ScannerRegistry()
-    registry.register(SecurityHeadersScanner())
-    return registry
+    return default_scanner_registry()
 
 
 def create_cli_context(*, application_service_factory=None, tool_runner=None,

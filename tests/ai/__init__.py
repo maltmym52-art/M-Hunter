@@ -1,0 +1,1 @@
+"""AI analyst architecture tests."""

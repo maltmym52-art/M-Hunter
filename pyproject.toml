@@ -13,8 +13,12 @@ dependencies = [
     "httpx>=0.27"
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+
 [project.scripts]
 m-hunter = "m_hunter.main:main"
+m-hunter-gui = "m_hunter.gui.app:main"
 
 [tool.setuptools.packages.find]
 include = ["m_hunter*"]
