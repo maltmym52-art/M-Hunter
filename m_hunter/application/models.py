@@ -66,8 +66,10 @@ class ScanRequest:
     scanner_names: tuple[str, ...] | None = None
     analyzer_names: tuple[str, ...] | None = None
     recon_source_names: tuple[str, ...] | None = None
+    analyzer_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     include_example_scanner: bool = False
     supplied_responses: Mapping[str, HttpResponse] = field(default_factory=dict)
+    supplied_requests: Mapping[str, HttpRequest] = field(default_factory=dict)
     cancel_event: Event | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -78,7 +80,12 @@ class ScanRequest:
             raise TypeError("authorization must be an AuthorizationGrant")
         self.target = self.target.strip()
         self.supplied_responses = dict(self.supplied_responses)
+        self.supplied_requests = dict(self.supplied_requests)
         self.metadata = dict(self.metadata)
+        self.analyzer_options = {
+            str(name): dict(options)
+            for name, options in self.analyzer_options.items()
+        }
         if self.recon_source_names is not None:
             names = tuple(str(name).strip() for name in self.recon_source_names)
             if any(not name for name in names):

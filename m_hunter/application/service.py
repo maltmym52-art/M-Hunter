@@ -42,6 +42,7 @@ from m_hunter.recon.url import URL
 from m_hunter.scanners.registry import ScannerRegistry
 from m_hunter.validation.analysis import AnalysisValidation
 from m_hunter.validation.analysis_pipeline import AnalysisFindingPipeline
+from m_hunter.validation.indicator_adapter import default_security_validators
 
 
 class ApplicationService:
@@ -82,7 +83,7 @@ class ApplicationService:
         )
         self.evidence_service = evidence_service if evidence_service is not None else EvidenceService()
         self._scope_manager = scope_manager
-        self.validators = dict(validators or {})
+        self.validators = {**default_security_validators(), **dict(validators or {})}
         self._scanner_lock = RLock()
 
         self.scanner_registry = (
@@ -416,6 +417,12 @@ class ApplicationService:
     ) -> dict[str, object]:
         self._stage(result, ScanStage.HTTP, StageState.RUNNING)
         responses: dict[str, object] = {}
+        for url, supplied_request in request.supplied_requests.items():
+            if is_in_scope(scope, url):
+                result.requests[url] = supplied_request
+            else:
+                self._issue(result, "ScopeManager", ScanStage.HTTP,
+                            "supplied request is outside scope", target=target_url, endpoint=url)
         for url, response in request.supplied_responses.items():
             if is_in_scope(scope, url):
                 responses[url] = response
@@ -563,20 +570,32 @@ class ApplicationService:
         for endpoint, response in responses.items():
             if not is_in_scope(scope, endpoint):
                 continue
-            context = AnalysisContext(
-                response=response,
-                content=getattr(response, "text", None),
-                request_url=endpoint,
-                target=result.scan.target,
-                request=result.requests.get(endpoint),
-                metadata={
-                    "scan_id": result.scan.id,
-                    "active_enabled": request.active,
-                    "authorization_reference": request.authorization.reference,
-                    **dict(request.metadata),
-                },
-            )
             for analyzer in analyzers:
+                capabilities = getattr(analyzer, "capabilities", None)
+                if ((getattr(capabilities, "mode", "passive") == "active"
+                     or getattr(capabilities, "requires_authorization", False))
+                        and (not request.active or not request.authorization.authorized)):
+                    self._issue(result, analyzer.name, ScanStage.ANALYZERS,
+                                "active analyzer requires explicit active mode and authorization",
+                                target=target_url, endpoint=endpoint)
+                    continue
+                if (getattr(capabilities, "requires_request", False)
+                        and endpoint not in result.requests):
+                    self._issue(result, analyzer.name, ScanStage.ANALYZERS,
+                                "analyzer skipped because request context is unavailable",
+                                target=target_url, endpoint=endpoint, level="warning")
+                    continue
+                context = AnalysisContext(
+                    response=response,
+                    content=getattr(response, "text", None),
+                    request_url=endpoint,
+                    target=result.scan.target,
+                    request=result.requests.get(endpoint),
+                    options=request.analyzer_options.get(analyzer.name, {}),
+                    # Do not copy arbitrary caller metadata or authorization
+                    # references into Finding metadata or evidence context.
+                    metadata={"scan_id": result.scan.id, "active_enabled": request.active},
+                )
                 try:
                     analysis = analyzer.run(context)
                     result.statistics.analyzers_run += 1
@@ -598,8 +617,8 @@ class ApplicationService:
                 delegate = validator
 
                 class _ScopeValidator:
-                    def validate(self, analysis, analysis_context):
-                        decision = delegate.validate(analysis, analysis_context)
+                    @staticmethod
+                    def _scope_decision(decision):
                         candidate = decision.candidate
                         if candidate is not None:
                             candidate_target = candidate.target or target_url
@@ -614,22 +633,37 @@ class ApplicationService:
                                 )
                         return decision
 
+                    def validate(self, analysis, analysis_context):
+                        return self._scope_decision(
+                            delegate.validate(analysis, analysis_context)
+                        )
+
+                    def validate_many(self, analysis, analysis_context):
+                        validate_many = getattr(delegate, "validate_many", None)
+                        decisions = (validate_many(analysis, analysis_context)
+                                     if callable(validate_many)
+                                     else [delegate.validate(analysis, analysis_context)])
+                        return [self._scope_decision(item) for item in decisions]
+
                 self._stage(result, ScanStage.VALIDATION, StageState.RUNNING)
                 try:
-                    processing = self.finding_pipeline.process(
+                    process_many = getattr(self.finding_pipeline, "process_many", None)
+                    processing_results = process_many(
                         analysis, context, _ScopeValidator()
-                    )
-                    result.statistics.analyses_validated += 1
-                    if processing.status == FindingProcessingStatus.CREATED and processing.finding:
-                        result.findings.append(processing.finding)
-                    elif processing.status == FindingProcessingStatus.DUPLICATE:
-                        result.statistics.duplicates += 1
-                    elif processing.status == FindingProcessingStatus.VALIDATION_FAILED:
-                        for error in processing.errors:
-                            self._issue(result, analyzer.name, ScanStage.VALIDATION, error, target=target_url, endpoint=endpoint)
-                    elif processing.status == FindingProcessingStatus.INVALID:
-                        for error in processing.errors:
-                            self._issue(result, analyzer.name, ScanStage.VALIDATION, error, target=target_url, endpoint=endpoint)
+                    ) if callable(process_many) else [self.finding_pipeline.process(
+                        analysis, context, _ScopeValidator()
+                    )]
+                    for processing in processing_results:
+                        result.statistics.analyses_validated += 1
+                        if processing.status == FindingProcessingStatus.CREATED and processing.finding:
+                            result.findings.append(processing.finding)
+                        elif processing.status == FindingProcessingStatus.DUPLICATE:
+                            result.statistics.duplicates += 1
+                        elif processing.status in {FindingProcessingStatus.VALIDATION_FAILED,
+                                                  FindingProcessingStatus.INVALID}:
+                            for error in processing.errors:
+                                self._issue(result, analyzer.name, ScanStage.VALIDATION,
+                                            error, target=target_url, endpoint=endpoint)
                 except Exception as exc:
                     self._issue(result, analyzer.name, ScanStage.VALIDATION, str(exc), target=target_url, endpoint=endpoint)
         self._stage(result, ScanStage.ANALYZERS, StageState.PARTIAL if result.errors else StageState.COMPLETED)

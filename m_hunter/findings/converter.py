@@ -7,6 +7,7 @@ from typing import Any
 from m_hunter.analyzers.context import AnalysisContext
 from m_hunter.analyzers.result import AnalysisResult
 from m_hunter.core.finding import Finding
+from m_hunter.evidence.redaction import EvidenceRedactor
 from m_hunter.validation.analysis import (
     AnalysisDisposition,
     AnalysisValidation,
@@ -36,6 +37,7 @@ class FindingConverter:
 
     def __init__(self, validator: FindingValidator | None = None) -> None:
         self.validator = validator or FindingValidator()
+        self.redactor = EvidenceRedactor()
         self._seen: set[tuple[Any, ...]] = set()
 
     @staticmethod
@@ -125,16 +127,23 @@ class FindingConverter:
                 "candidate": dict(candidate.metadata),
             },
         }
+        # Finding objects may be inspected outside Reporting. Keep arbitrary
+        # analyzer/validator metadata sanitized at this boundary as well.
+        combined_metadata = self.redactor.redact_value(combined_metadata)
+
+        def safe_text(value: str | None) -> str | None:
+            return self.redactor.redact_text(value) if isinstance(value, str) else value
+
         finding = Finding(
-            title=candidate.title,
-            severity=candidate.severity,
-            confidence=candidate.confidence,
-            target=target,
-            endpoint=candidate.endpoint,
-            parameter=candidate.parameter,
-            description=candidate.description,
-            evidence=candidate.evidence,
-            remediation=candidate.remediation,
+            title=safe_text(candidate.title),
+            severity=safe_text(candidate.severity),
+            confidence=safe_text(candidate.confidence),
+            target=safe_text(target),
+            endpoint=safe_text(candidate.endpoint),
+            parameter=safe_text(candidate.parameter),
+            description=safe_text(candidate.description),
+            evidence=safe_text(candidate.evidence),
+            remediation=safe_text(candidate.remediation),
             cwe=candidate.cwe,
             owasp=candidate.owasp,
             status=candidate.status,

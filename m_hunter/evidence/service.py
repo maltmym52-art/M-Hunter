@@ -46,6 +46,13 @@ class EvidenceService:
         # Legacy Finding.evidence remains a supported display field, so keep it
         # useful while ensuring its text cannot bypass evidence redaction.
         finding.evidence = record.sanitized.evidence
+        redactor = self.collector.redactor
+        for attribute in ("title", "target", "endpoint", "parameter", "description",
+                          "remediation", "cwe", "owasp"):
+            value = getattr(finding, attribute, None)
+            if isinstance(value, str):
+                setattr(finding, attribute, redactor.redact_text(value))
+        finding.metadata = redactor.redact_value(finding.metadata)
         return self.store.associate(record.id, finding)
 
     def record_legacy_finding(self, finding: Finding) -> Evidence:

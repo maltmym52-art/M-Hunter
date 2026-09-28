@@ -20,6 +20,9 @@ from rich.table import Table
 from m_hunter.analyzers.registry import AnalyzerRegistry
 from m_hunter.analyzers.metadata import MetadataAnalyzer
 from m_hunter.analyzers.security_headers import SecurityHeadersAnalyzer
+from m_hunter.analyzers.security_headers_baseline import SecurityHeadersBaselineAnalyzer
+from m_hunter.analyzers.http_cookie_security import HttpCookieSecurityAnalyzer
+from m_hunter.analyzers.cache_control_security import CacheControlSecurityAnalyzer
 from m_hunter.application import (
     ApplicationService, AuthorizationGrant, ScanExecutionResult,
     ScanRequest, ScanState,
@@ -86,6 +89,9 @@ def _make_service(*, timeout: float, scope_manager: ScopeManager,
     analyzers = AnalyzerRegistry()
     analyzers.register(SecurityHeadersAnalyzer())
     analyzers.register(MetadataAnalyzer())
+    analyzers.register(SecurityHeadersBaselineAnalyzer())
+    analyzers.register(HttpCookieSecurityAnalyzer())
+    analyzers.register(CacheControlSecurityAnalyzer())
     return ApplicationService(
         http_engine=HttpEngine(HttpSettings(timeout=timeout)),
         tool_runner=runner,

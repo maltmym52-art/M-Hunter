@@ -102,3 +102,25 @@ class AnalysisFindingPipeline:
                 parameter=(candidate.parameter if candidate else None),
             )
         return result
+
+    def process_many(self, analysis: AnalysisResult, context: AnalysisContext,
+                     validator: AnalysisValidator) -> list[FindingProcessingResult]:
+        """Process all decisions from a legacy indicator validator, if present."""
+        validate_many = getattr(validator, "validate_many", None)
+        if not callable(validate_many):
+            return [self.process(analysis, context, validator)]
+        try:
+            decisions = validate_many(analysis, context)
+        except Exception as exc:
+            return [FindingProcessingResult(
+                FindingProcessingStatus.VALIDATION_FAILED,
+                errors=(f"validator failed: {exc}",),
+            )]
+
+        results = []
+        for decision in decisions:
+            class _FixedDecision:
+                def validate(self, _analysis, _context):
+                    return decision
+            results.append(self.process(analysis, context, _FixedDecision()))
+        return results
