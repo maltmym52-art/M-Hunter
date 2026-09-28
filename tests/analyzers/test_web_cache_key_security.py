@@ -11,6 +11,9 @@ def make_response(headers=None):
         url="https://example.com/",
         headers=headers or {},
         content=b"ok",
+        cookies={},
+        response_time=0.0,
+        content_length=len(b"ok"),
     )
 
 

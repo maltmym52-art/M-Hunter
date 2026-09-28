@@ -247,7 +247,7 @@ def test_timeout_is_reported():
 
 def test_timeout_captures_partial_output():
     runner = ToolRunner(
-        default_timeout=0.1
+        default_timeout=5.0
     )
 
     result = runner.run(
@@ -258,9 +258,10 @@ def test_timeout_captures_partial_output():
                 "import sys,time; "
                 "print('before-timeout'); "
                 "sys.stdout.flush(); "
-                "time.sleep(1)"
+                "time.sleep(10)"
             ),
-        ]
+        ],
+        timeout=5.0,
     )
 
     assert result.timed_out is True
