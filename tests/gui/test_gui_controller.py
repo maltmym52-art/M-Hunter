@@ -16,6 +16,7 @@ from m_hunter.core.scan import Scan
 from m_hunter.core.target import Target
 from m_hunter.evidence.service import EvidenceService
 from m_hunter.gui.controller import GUIController
+from m_hunter.gui.app import GUIUnavailableError, launch
 from m_hunter.reporting.service import ReportService
 
 
@@ -161,3 +162,21 @@ def test_cancellation_is_cooperative_and_keeps_result_state_consistent():
     assert result.state == ScanState.CANCELLED
     assert controller.last_result is result
     controller.close()
+
+
+
+
+def test_optional_gui_import_and_launch_report_missing_qt_cleanly():
+    import importlib.util
+
+    if importlib.util.find_spec("PySide6") is not None:
+        return
+    service = ApplicationService()
+    try:
+        launch(service)
+    except GUIUnavailableError as exc:
+        assert "m-hunter[gui]" in str(exc)
+    else:
+        raise AssertionError("GUI launch should explain the optional dependency")
+    finally:
+        service.close()

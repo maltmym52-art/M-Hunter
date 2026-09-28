@@ -22,6 +22,9 @@ cancellation checkpoints, lifecycle state, and errors. The CLI and desktop UI
 are presentation clients. Both submit `ScanRequest` and consume
 `ScanExecutionResult`; neither implements scanning or vulnerability logic.
 Reporting uses the same `ReportService` and normalized, redacted report model.
+`create_default_application_service` composes the shared default analyzer and
+scanner registrations for CLI and desktop entrypoints; ExampleScanner remains
+excluded.
 
 ## Application service and events
 
@@ -106,3 +109,6 @@ execute tools/payloads, or bypass ScopeManager or authorization.
   GUI, or AI.
 - Evidence/report/UI exports redact Authorization, Cookie, JWT, API keys,
   passwords, tokens, and sensitive query/form values.
+
+Release smoke tests use supplied HTTP observations and in-memory Recon sources;
+they do not contact public targets or run optional scanning tools.

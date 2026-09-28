@@ -25,7 +25,10 @@ adapter; custom mandatory inputs are supplied through `ScanRequest.analyzer_opti
 or an explicit `register_legacy` invocation. “Specialized” means a legacy
 validator/pipeline or Finding catalog exists, but is not yet the generic unified
 AnalysisValidation contract. End-to-end status refers to tested full-path
-coverage in `tests/application/test_security_coverage_e2e.py`.
+coverage in `tests/application/test_security_coverage_e2e.py` and the synthetic
+release flow in `tests/release/test_local_smoke.py`. The release fixture covers
+passive header, cookie, cache, and marker-reflection plumbing; marker reflection
+is not an exploitability claim.
 
 | Security area | Analysis modules found | Validation / Finding modules found | State and capability notes |
 |---|---|---|---|

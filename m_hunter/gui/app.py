@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from m_hunter.ai.service import AIAnalysisService
@@ -158,4 +159,10 @@ def launch(application_service: ApplicationService, argv: list[str] | None = Non
 
 def main() -> int:
     """Standalone entry point using the same application service contract as CLI."""
-    return launch(create_default_application_service(external_tools=False))
+    service = create_default_application_service(external_tools=False)
+    try:
+        return launch(service)
+    except GUIUnavailableError as exc:
+        service.close()
+        print(str(exc), file=sys.stderr)
+        return 2
