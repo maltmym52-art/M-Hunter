@@ -1,17 +1,9 @@
-def main():
-    print("""
-╔══════════════════════════════════════════╗
-║              M - HUNTER                  ║
-║      Web Security Research Platform      ║
-║                                          ║
-║      Discover • Analyze • Validate       ║
-║                    • Report              ║
-╚══════════════════════════════════════════╝
-""")
+from m_hunter.cli.app import app
 
-    print("[+] M-Hunter initialized")
-    print("[+] Version: 0.1.0")
-    print("[+] Platform: Kali Linux")
+
+def main():
+    """Launch the M-Hunter command line interface."""
+    app()
 
 
 if __name__ == "__main__":
