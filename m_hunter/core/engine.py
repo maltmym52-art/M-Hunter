@@ -1,4 +1,6 @@
 from m_hunter.analyzers.registry import AnalyzerRegistry
+from m_hunter.analyzers.context import AnalysisContext
+from m_hunter.analyzers.result import AnalysisResult
 from m_hunter.core.finding import Finding
 from m_hunter.core.response import HttpResponse
 from m_hunter.core.scan import Scan
@@ -60,11 +62,26 @@ class ScanEngine:
     def run_analyzers(
         self,
         response: HttpResponse,
-    ) -> dict[str, dict]:
-        results: dict[str, dict] = {}
+    ) -> dict[str, object]:
+        """Run analyzers while preserving the historical raw-data mapping."""
+        context = AnalysisContext(response=response)
+        return {
+            name: result.data
+            for name, result in self.run_analysis(context).items()
+        }
+
+    def run_analysis(
+        self,
+        context: AnalysisContext,
+    ) -> dict[str, AnalysisResult]:
+        """Run registered analyzers using the unified context interface."""
+        if not isinstance(context, AnalysisContext):
+            raise TypeError("context must be an AnalysisContext")
+
+        results: dict[str, AnalysisResult] = {}
 
         for analyzer in self.analyzer_registry.get_all():
-            results[analyzer.name] = analyzer.analyze(response)
+            results[analyzer.name] = analyzer.run(context)
 
         return results
 

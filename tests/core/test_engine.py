@@ -1,6 +1,10 @@
 from m_hunter.analyzers.base import BaseAnalyzer
+from m_hunter.analyzers.adapters import LegacyAnalyzerAdapter
+from m_hunter.analyzers.context import AnalysisContext
 from m_hunter.analyzers.metadata import MetadataAnalyzer
 from m_hunter.analyzers.registry import AnalyzerRegistry
+from m_hunter.analyzers.result import AnalysisResult
+from m_hunter.analyzers.coop import COOPAnalyzer
 from m_hunter.core.response import HttpResponse
 from m_hunter.core.engine import ScanEngine
 from m_hunter.core.finding import Finding
@@ -489,6 +493,38 @@ def test_run_analyzers_with_metadata_analyzer():
     assert results["metadata"]["status_code"] == 200
     assert results["metadata"]["url"] == "https://example.com"
     assert results["metadata"]["is_html"] is True
+
+
+def test_run_analysis_returns_unified_results_for_legacy_analyzers():
+    registry = AnalyzerRegistry()
+    analyzer = COOPAnalyzer()
+    registry.register(LegacyAnalyzerAdapter(analyzer))
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    results = engine.run_analysis(
+        AnalysisContext(response=make_analyzer_response())
+    )
+
+    assert isinstance(results["coop"], AnalysisResult)
+    assert results["coop"].analyzer_name == "coop"
+    assert type(results["coop"].data).__name__ == "COOPAnalysis"
+
+
+def test_run_analyzers_keeps_raw_adapter_data_for_compatibility():
+    registry = AnalyzerRegistry()
+    analyzer = COOPAnalyzer()
+    registry.register(LegacyAnalyzerAdapter(analyzer))
+    engine = ScanEngine(
+        analyzer_registry=registry,
+        auto_discover=False,
+    )
+
+    results = engine.run_analyzers(make_analyzer_response())
+
+    assert type(results["coop"]).__name__ == "COOPAnalysis"
 
 
 def test_scan_engine_scanner_registry_and_analyzer_registry_are_independent():
