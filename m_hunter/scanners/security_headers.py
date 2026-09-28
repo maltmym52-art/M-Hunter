@@ -7,6 +7,8 @@ from m_hunter.scanners.base import BaseScanner
 class SecurityHeadersScanner(BaseScanner):
     name = "security_headers"
     description = "Checks for missing HTTP security headers"
+    scope_aware = True
+    uses_http = True
 
     REQUIRED_HEADERS = {
         "strict-transport-security": {
@@ -41,9 +43,14 @@ class SecurityHeadersScanner(BaseScanner):
         },
     }
 
+    def __init__(self, http=None):
+        """Accept a shared HTTP client; default construction stays compatible."""
+        self.http = http
+
     def run(self, target: Target) -> list[Finding]:
-        http = HttpEngine()
-        response = http.get(target.url)
+        if self.http is None:
+            self.http = HttpEngine()
+        response = self.http.get(target.url)
 
         findings: list[Finding] = []
 

@@ -7,6 +7,7 @@ class SubfinderSource(DiscoverySource):
     """Discovers subdomains using ProjectDiscovery Subfinder."""
 
     name = "subfinder"
+    passive = True
 
     def __init__(
         self,

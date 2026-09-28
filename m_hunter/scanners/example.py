@@ -6,6 +6,7 @@ from m_hunter.scanners.base import BaseScanner
 class ExampleScanner(BaseScanner):
     name = "example"
     description = "Example scanner for testing the scanner architecture"
+    scope_aware = True
 
     def run(self, target: Target) -> list[Finding]:
         finding = Finding(

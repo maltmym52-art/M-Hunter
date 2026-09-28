@@ -13,6 +13,8 @@ from m_hunter.validation.analysis_pipeline import (
     AnalysisFindingPipeline,
     AnalysisValidator,
 )
+from m_hunter.core.http import HttpEngine
+from m_hunter.integrations.tools.runner import ToolRunner
 
 
 class ScanEngine:
@@ -22,6 +24,8 @@ class ScanEngine:
         *,
         analyzer_registry: AnalyzerRegistry | None = None,
         finding_pipeline: AnalysisFindingPipeline | None = None,
+        http_engine: HttpEngine | None = None,
+        tool_runner: ToolRunner | None = None,
         auto_discover: bool = True,
     ):
         if registry is None:
@@ -37,6 +41,8 @@ class ScanEngine:
             else AnalyzerRegistry()
         )
         self.finding_pipeline = finding_pipeline or AnalysisFindingPipeline()
+        self.http_engine = http_engine
+        self.tool_runner = tool_runner
 
     def create_scan(self, target_url: str) -> Scan:
         target = Target(target_url)

@@ -222,6 +222,19 @@ def test_http_engine_passes_params(monkeypatch):
     engine.close()
 
 
+def test_http_engine_allows_per_request_redirect_override(monkeypatch):
+    patch_client(monkeypatch)
+    engine = HttpEngine()
+
+    engine.get("https://example.com/redirect", follow_redirects=False)
+    engine.get("https://example.com/default")
+
+    calls = FakeClient.instances[0].request_calls
+    assert calls[0]["kwargs"]["follow_redirects"] is False
+    assert "follow_redirects" not in calls[1]["kwargs"]
+    engine.close()
+
+
 def test_http_engine_passes_data(monkeypatch):
     patch_client(monkeypatch)
 

@@ -8,6 +8,8 @@ class DiscoverySource(ABC):
     """Base interface for a Recon asset discovery source."""
 
     name: str = "base"
+    passive: bool = False
+    scope_aware: bool = False
 
     @abstractmethod
     def discover(self, target: str) -> list[Asset]:

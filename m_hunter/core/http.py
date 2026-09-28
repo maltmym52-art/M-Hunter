@@ -38,6 +38,7 @@ class HttpEngine:
         params: dict[str, str] | None = None,
         data=None,
         json=None,
+        follow_redirects: bool | None = None,
     ) -> HttpResponse:
         if self._closed:
             raise RuntimeError("HttpEngine is closed")
@@ -69,6 +70,9 @@ class HttpEngine:
                 request_kwargs["content"] = data
             else:
                 request_kwargs["data"] = data
+
+        if follow_redirects is not None:
+            request_kwargs["follow_redirects"] = follow_redirects
 
         start_time = time.perf_counter()
 
@@ -165,6 +169,7 @@ class HttpEngine:
         params: dict[str, str] | None = None,
         data=None,
         json=None,
+        follow_redirects: bool | None = None,
     ) -> HttpResponse:
         return self._send(
             method,
@@ -174,6 +179,7 @@ class HttpEngine:
             params=params,
             data=data,
             json=json,
+            follow_redirects=follow_redirects,
         )
 
     def close(self) -> None:
