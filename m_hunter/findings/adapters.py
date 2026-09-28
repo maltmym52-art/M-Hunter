@@ -5,6 +5,8 @@ from typing import Any
 
 from m_hunter.core.finding import Finding
 from m_hunter.findings.converter import FindingConverter
+from m_hunter.analyzers.context import AnalysisContext
+from m_hunter.evidence.service import EvidenceService
 
 
 class LegacyFindingAdapter:
@@ -57,7 +59,13 @@ class LegacyFindingAdapter:
         return FindingConverter.create_from_fields(**fields)
 
     @classmethod
-    def from_pipeline_output(cls, output: Any) -> list[Finding]:
+    def from_pipeline_output(
+        cls,
+        output: Any,
+        *,
+        evidence_service: EvidenceService | None = None,
+        context: AnalysisContext | None = None,
+    ) -> list[Finding]:
         """Adapt a legacy pipeline result or iterable of findings."""
         values = getattr(output, "findings", output)
         if isinstance(values, Finding):
@@ -66,4 +74,19 @@ class LegacyFindingAdapter:
             raise TypeError(
                 "legacy pipeline output must contain an iterable of findings"
             )
-        return [cls.to_core(value) for value in values]
+        findings = [cls.to_core(value) for value in values]
+        if evidence_service is not None:
+            for finding in findings:
+                if context is not None:
+                    evidence_service.record(
+                        context,
+                        finding,
+                        analyzer="legacy",
+                        source="legacy_pipeline",
+                        evidence=finding.evidence,
+                        description=finding.description,
+                        parameter=finding.parameter,
+                    )
+                else:
+                    evidence_service.record_legacy_finding(finding)
+        return findings

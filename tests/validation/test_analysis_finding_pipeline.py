@@ -73,6 +73,18 @@ def test_analysis_finding_pipeline_creates_core_finding():
     assert result.finding.metadata["analysis"]["analyzer_name"] == (
         "test-analyzer"
     )
+    assert len(result.finding.evidence_ids) == 1
+    # The record is kept by the pipeline instance that processed the result.
+    pipeline = AnalysisFindingPipeline()
+    pipeline_result = pipeline.process(
+        make_analysis(),
+        AnalysisContext(target="https://example.com"),
+        FindingValidatorStub(),
+    )
+    assert pipeline_result.finding.evidence_ids
+    assert pipeline.evidence_service.store.for_finding(
+        pipeline_result.finding
+    )[0].sanitized.evidence == "observed response marker"
 
 
 def test_analysis_finding_pipeline_keeps_informational_result_non_finding():
@@ -132,3 +144,4 @@ def test_scan_engine_exposes_analysis_validation_path():
 
     assert result.status == FindingProcessingStatus.CREATED
     assert isinstance(result.finding, Finding)
+    assert result.finding.evidence_ids

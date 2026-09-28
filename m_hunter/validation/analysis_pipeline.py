@@ -10,6 +10,7 @@ from m_hunter.findings.converter import (
     FindingProcessingResult,
     FindingProcessingStatus,
 )
+from m_hunter.evidence.service import EvidenceService
 from m_hunter.validation.analysis import AnalysisValidation
 
 
@@ -29,9 +30,15 @@ class AnalysisFindingPipeline:
     """Apply semantic validation, structural validation, and conversion."""
 
     converter: FindingConverter
+    evidence_service: EvidenceService
 
-    def __init__(self, converter: FindingConverter | None = None) -> None:
+    def __init__(
+        self,
+        converter: FindingConverter | None = None,
+        evidence_service: EvidenceService | None = None,
+    ) -> None:
         self.converter = converter or FindingConverter()
+        self.evidence_service = evidence_service or EvidenceService()
 
     def process(
         self,
@@ -66,4 +73,32 @@ class AnalysisFindingPipeline:
                 ),
             )
 
-        return self.converter.convert(analysis, decision, context)
+        result = self.converter.convert(analysis, decision, context)
+        if (
+            result.status == FindingProcessingStatus.CREATED
+            and result.finding is not None
+        ):
+            candidate = decision.candidate
+            evidence_context = AnalysisContext(
+                response=context.response,
+                content=context.content,
+                request_url=context.request_url,
+                target=context.target,
+                request=context.request,
+                options=context.options,
+                metadata={
+                    **dict(context.metadata),
+                    "analysis": dict(analysis.metadata),
+                    "validation": dict(decision.metadata),
+                },
+            )
+            self.evidence_service.record(
+                evidence_context,
+                result.finding,
+                analyzer=analysis.analyzer_name,
+                source="analysis_validation",
+                evidence=(candidate.evidence if candidate else ""),
+                description=(candidate.description if candidate else ""),
+                parameter=(candidate.parameter if candidate else None),
+            )
+        return result

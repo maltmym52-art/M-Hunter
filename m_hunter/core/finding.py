@@ -23,3 +23,4 @@ class Finding:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
+    evidence_ids: list[str] = field(default_factory=list)
