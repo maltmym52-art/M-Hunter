@@ -22,6 +22,7 @@ from m_hunter.recon.discovery import DiscoverySource
 from m_hunter.recon.scope import ScopeManager
 from m_hunter.recon.url import URL
 from m_hunter.reporting.service import ReportService
+from m_hunter.findings.identity import finding_semantic_identity
 from m_hunter.scanners.example import ExampleScanner
 from m_hunter.scanners.registry import ScannerRegistry
 from m_hunter.integrations.tools.recon_sources import NmapSource
@@ -95,6 +96,111 @@ def test_passive_security_headers_flow_reaches_report():
     assert any(finding.title == "Legacy X-XSS-Protection Configuration" for finding in result.findings)
     report = ReportService().build(result, service.evidence_service)
     assert any("Legacy X-XSS-Protection" in item["title"] for item in report.findings)
+
+
+def test_default_server_version_disclosure_flows_to_evidence_and_all_reports():
+    from m_hunter.application.factory import create_default_application_service
+
+    target = "http://127.0.0.1:8765/"
+    supplied = response(target, headers={"Server": "nginx/1.25.3"})
+    service = create_default_application_service()
+    http_spy = FakeHTTP()
+    service.http_engine = http_spy
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={target: supplied},
+    ))
+    assert http_spy.calls == []
+
+    matches = [item for item in result.findings
+               if item.title == "Server Version Disclosure"]
+    assert len(matches) == 1
+    finding = matches[0]
+    assert finding.severity == "Low"
+    assert finding.confidence == "High"
+    assert finding.evidence == "nginx/1.25.3"
+    assert finding_semantic_identity(finding) == (
+        "semantic", "server_version_disclosure"
+    )
+    evidence = service.evidence_service.store.for_finding(finding)
+    assert len(evidence) == 1
+    assert evidence[0].sanitized.evidence == "nginx/1.25.3"
+    assert evidence[0].sanitized.headers["response"]["Server"] == "nginx/1.25.3"
+
+    reports = ReportService()
+    model = reports.build(result, service.evidence_service)
+    outputs = {
+        fmt: reports.render(model, fmt)
+        for fmt in ("json", "markdown", "html")
+    }
+    assert "Server Version Disclosure" in outputs["json"]
+    assert "nginx/1.25.3" in outputs["json"]
+    assert "Server Version Disclosure" in outputs["markdown"]
+    assert "nginx/1.25.3" in outputs["markdown"]
+    assert "Server Version Disclosure" in outputs["html"]
+    assert "nginx/1.25.3" in outputs["html"]
+
+
+def test_server_version_disclosure_requires_a_version_and_is_passive():
+    from m_hunter.application.factory import create_default_application_service
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    analyzer = service.analyzer_registry.get("http_response_security")
+    assert analyzer.capabilities.mode == "passive"
+    assert not analyzer.capabilities.requires_authorization
+
+    for headers in ({"Server": "nginx"}, {}):
+        result = service.run(ScanRequest(
+            target,
+            run_scanners=False,
+            supplied_responses={target: response(target, headers=headers)},
+        ))
+        assert not any(item.title == "Server Version Disclosure"
+                       for item in result.findings)
+
+
+def test_server_version_observation_identity_preserves_distinct_versions():
+    from m_hunter.application.factory import create_default_application_service
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    for version in ("nginx/1.25.3", "nginx/1.26.0"):
+        result = service.run(ScanRequest(
+            target,
+            run_scanners=False,
+            supplied_responses={target: response(target, headers={"Server": version})},
+        ))
+        finding = next(item for item in result.findings
+                       if item.title == "Server Version Disclosure")
+        assert finding.evidence == version
+        evidence = service.evidence_service.store.for_finding(finding)
+        assert any(item.sanitized.evidence == version for item in evidence)
+
+
+def test_semantically_identical_server_observations_are_deduplicated():
+    from m_hunter.application.factory import create_default_application_service
+    from m_hunter.analyzers.http_response_security import HttpResponseSecurityAnalyzer
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    duplicate_name = "http_response_security_repeat"
+    service.analyzer_registry.register_legacy(
+        HttpResponseSecurityAnalyzer(), name=duplicate_name
+    )
+    service.validators[duplicate_name] = service.validators["http_response_security"]
+
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={target: response(target, headers={"Server": "nginx/1.25.3"})},
+    ))
+    matches = [item for item in result.findings
+               if item.title == "Server Version Disclosure"]
+    assert len(matches) == 1
+    assert result.statistics.duplicates == 1
+    assert matches[0].evidence == "nginx/1.25.3"
 
 
 def test_missing_x_content_type_options_is_one_finding_across_scanner_and_analyzer():

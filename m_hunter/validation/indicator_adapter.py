@@ -84,12 +84,14 @@ class LegacyIndicatorValidator:
 
 
 def default_security_validators() -> dict[str, LegacyIndicatorValidator]:
-    """Existing passive header, cookie, and cache decisions in unified form."""
+    """Existing passive response, header, cookie, and cache decisions."""
     from m_hunter.findings.cache_control_security import CacheControlSecurityFinding
     from m_hunter.findings.http_cookie_security import HttpCookieSecurityFinding
+    from m_hunter.findings.http_response_security import HttpResponseSecurityFinding
     from m_hunter.findings.security_headers_baseline import SecurityHeadersBaselineFinding
     from m_hunter.validation.cache_control_security import CacheControlSecurityValidator
     from m_hunter.validation.http_cookie_security import HttpCookieSecurityValidator
+    from m_hunter.validation.http_response_security import HttpResponseSecurityValidator
     from m_hunter.validation.security_headers_baseline import SecurityHeadersBaselineValidator
 
     return {
@@ -101,5 +103,8 @@ def default_security_validators() -> dict[str, LegacyIndicatorValidator]:
         ),
         "cache_control_security": LegacyIndicatorValidator(
             CacheControlSecurityValidator(), CacheControlSecurityFinding
+        ),
+        "http_response_security": LegacyIndicatorValidator(
+            HttpResponseSecurityValidator(), HttpResponseSecurityFinding
         ),
     }

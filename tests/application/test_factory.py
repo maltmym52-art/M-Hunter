@@ -41,3 +41,31 @@ def test_factory_accepts_custom_external_tool_timeout():
         "subfinder": 45.0,
         "amass": 45.0,
     }
+
+
+def test_factory_registers_runnable_http_response_security_analyzer():
+    from m_hunter.application import ScanRequest
+    from m_hunter.core.response import HttpResponse
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    assert "http_response_security" in service.analyzer_registry.names()
+
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={target: HttpResponse(
+            status_code=200,
+            url=target,
+            headers={"Server": "nginx/1.25.3"},
+            content=b"",
+            cookies={},
+            response_time=0.01,
+            content_length=0,
+        )},
+    ))
+
+    finding = next(item for item in result.findings
+                   if item.title == "Server Version Disclosure")
+    assert finding.evidence == "nginx/1.25.3"
+    assert finding.evidence_ids

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from m_hunter.analyzers.cache_control_security import CacheControlSecurityAnalyzer
 from m_hunter.analyzers.http_cookie_security import HttpCookieSecurityAnalyzer
+from m_hunter.analyzers.http_response_security import HttpResponseSecurityAnalyzer
 from m_hunter.analyzers.metadata import MetadataAnalyzer
 from m_hunter.analyzers.registry import AnalyzerRegistry
 from m_hunter.analyzers.security_headers import SecurityHeadersAnalyzer
@@ -60,6 +61,7 @@ def create_default_application_service(
     for analyzer in (
         SecurityHeadersAnalyzer(), MetadataAnalyzer(), SecurityHeadersBaselineAnalyzer(),
         HttpCookieSecurityAnalyzer(), CacheControlSecurityAnalyzer(),
+        HttpResponseSecurityAnalyzer(),
     ):
         analyzers.register(analyzer)
     return ApplicationService(
