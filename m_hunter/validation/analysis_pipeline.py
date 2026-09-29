@@ -75,7 +75,10 @@ class AnalysisFindingPipeline:
 
         result = self.converter.convert(analysis, decision, context)
         if (
-            result.status == FindingProcessingStatus.CREATED
+            result.status in {
+                FindingProcessingStatus.CREATED,
+                FindingProcessingStatus.DUPLICATE,
+            }
             and result.finding is not None
         ):
             candidate = decision.candidate

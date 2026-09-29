@@ -69,12 +69,12 @@ def test_from_analysis():
         endpoint="/",
     )
 
-    assert len(findings) == 7
+    assert len(findings) == 6
 
     titles = {finding.title for finding in findings}
 
     assert "X-Content-Type-Options Header Missing" in titles
-    assert "MIME Sniffing Protection Missing" in titles
+    assert "MIME Sniffing Protection Missing" not in titles
     assert "Legacy X-XSS-Protection Configuration" in titles
     assert "Deprecated Expect-CT Header" in titles
     assert "Broad Cross-Domain Policy" in titles

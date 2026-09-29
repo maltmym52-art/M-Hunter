@@ -22,6 +22,19 @@ def test_x_content_type_options_missing():
     assert result.has_type(SecurityHeaderIndicatorType.NOSNIFF_MISSING)
 
 
+def test_invalid_x_content_type_options_reports_missing_nosniff():
+    result = SecurityHeadersBaselineAnalyzer().analyze(
+        x_content_type_options="invalid",
+    )
+
+    nosniff = [
+        item for item in result.indicators
+        if item.type == SecurityHeaderIndicatorType.NOSNIFF_MISSING
+    ]
+    assert len(nosniff) == 1
+    assert nosniff[0].value == "invalid"
+
+
 def test_x_xss_protection():
     result = SecurityHeadersBaselineAnalyzer().analyze(
         x_xss_protection="1; mode=block",

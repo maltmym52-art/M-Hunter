@@ -170,7 +170,7 @@ def test_duplicate_finding_is_suppressed():
 
     assert first.status == FindingProcessingStatus.CREATED
     assert second.status == FindingProcessingStatus.DUPLICATE
-    assert second.finding is None
+    assert second.finding is not None
 
 
 def test_legacy_finding_adapter_preserves_canonical_finding_identity():

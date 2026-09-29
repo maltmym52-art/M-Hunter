@@ -22,9 +22,21 @@ class SecurityHeadersBaselinePipeline:
         endpoint: str | None = None,
     ):
         findings = []
+        indicator_types = {
+            getattr(item.type, "name", item.type)
+            for item in analysis.indicators
+        }
 
         for indicator in analysis.indicators:
             indicator_type = getattr(indicator.type, "name", indicator.type)
+
+            if any(
+                required in indicator_types
+                for required in SecurityHeadersBaselineFinding.DUPLICATE_INDICATORS.get(
+                    indicator_type, ()
+                )
+            ):
+                continue
 
             validation = self.validator.validate(indicator_type)
 

@@ -1,5 +1,6 @@
 """Orchestrate scan components without coupling execution to a user interface."""
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Mapping
@@ -39,6 +40,7 @@ from m_hunter.events.scan import (
 from m_hunter.findings.converter import (
     FindingProcessingStatus,
 )
+from m_hunter.findings.identity import finding_deduplication_key
 from m_hunter.integrations.tools.runner import ToolRunner
 from m_hunter.integrations.tools.catalog import ToolCatalog
 from m_hunter.recon.asset import Asset
@@ -558,7 +560,7 @@ class ApplicationService:
                         scanner.http = previous_http
         result.statistics.http_requests += client.request_count
         self._merge_observations(result, client)
-        existing_keys = {self._finding_key(item) for item in result.findings}
+        existing = {self._finding_key(item): item for item in result.findings}
         for finding in findings:
             if not is_in_scope(scope, finding.target) or (
                 finding.endpoint is not None
@@ -567,13 +569,22 @@ class ApplicationService:
                 self._issue(result, "ScopeManager", ScanStage.SCANNERS, "scanner finding target is outside scope", target=target_url, endpoint=finding.endpoint)
                 continue
             key = self._finding_key(finding)
-            if key in existing_keys:
-                result.statistics.duplicates += 1
+            if key in existing:
+                try:
+                    self.evidence_service.record_legacy_finding(finding)
+                    self._merge_duplicate_finding(existing[key], finding)
+                    for evidence_id in existing[key].evidence_ids:
+                        evidence = self.evidence_service.store.get(evidence_id)
+                        if evidence is not None:
+                            self.evidence_service.store.associate(evidence_id, existing[key])
+                    result.statistics.duplicates += 1
+                except Exception as exc:
+                    self._issue(result, "EvidenceService", ScanStage.EVIDENCE, str(exc), target=target_url, endpoint=finding.endpoint)
                 continue
             try:
                 self.evidence_service.record_legacy_finding(finding)
                 result.findings.append(finding)
-                existing_keys.add(key)
+                existing[key] = finding
             except Exception as exc:
                 self._issue(result, "EvidenceService", ScanStage.EVIDENCE, str(exc), target=target_url, endpoint=finding.endpoint)
         self._stage(result, ScanStage.SCANNERS, StageState.PARTIAL if result.errors else StageState.COMPLETED)
@@ -681,12 +692,14 @@ class ApplicationService:
                     )]
                     for processing in processing_results:
                         result.statistics.analyses_validated += 1
-                        if processing.status == FindingProcessingStatus.CREATED and processing.finding:
+                        if processing.status in {
+                            FindingProcessingStatus.CREATED,
+                            FindingProcessingStatus.DUPLICATE,
+                        } and processing.finding:
                             result.findings.append(processing.finding)
-                            self._publish(FindingCreated, result, stage=ScanStage.VALIDATION.value,
-                                          message=processing.finding.id)
-                        elif processing.status == FindingProcessingStatus.DUPLICATE:
-                            result.statistics.duplicates += 1
+                            if processing.status == FindingProcessingStatus.CREATED:
+                                self._publish(FindingCreated, result, stage=ScanStage.VALIDATION.value,
+                                              message=processing.finding.id)
                         elif processing.status in {FindingProcessingStatus.VALIDATION_FAILED,
                                                   FindingProcessingStatus.INVALID}:
                             for error in processing.errors:
@@ -721,14 +734,63 @@ class ApplicationService:
         result.statistics.http_responses += len(client.response_log)
 
     @staticmethod
-    def _finding_key(finding: Finding) -> tuple[str, ...]:
-        return (
-            finding.title.casefold(),
-            finding.target.casefold(),
-            (finding.endpoint or "").casefold(),
-            (finding.parameter or "").casefold(),
-            finding.evidence,
+    def _finding_key(finding: Finding) -> tuple:
+        return finding_deduplication_key(finding)
+
+    @staticmethod
+    def _merge_duplicate_finding(canonical: Finding, duplicate: Finding) -> None:
+        """Retain the strongest validated rating and all duplicate provenance."""
+        severity_order = {
+            "critical": 0, "high": 1, "medium": 2,
+            "low": 3, "info": 4,
+        }
+        canonical_severity = severity_order.get(canonical.severity.casefold())
+        duplicate_severity = severity_order.get(duplicate.severity.casefold())
+        if (duplicate_severity is not None and
+                (canonical_severity is None or duplicate_severity < canonical_severity)):
+            canonical.severity = duplicate.severity
+
+        confidence_order = {"high": 0, "medium": 1, "low": 2}
+        canonical_confidence = confidence_order.get(canonical.confidence.casefold())
+        duplicate_confidence = confidence_order.get(duplicate.confidence.casefold())
+        if (duplicate_confidence is not None and
+                (canonical_confidence is None or duplicate_confidence < canonical_confidence)):
+            canonical.confidence = duplicate.confidence
+
+        for field in ("description", "remediation"):
+            current = getattr(canonical, field)
+            incoming = getattr(duplicate, field)
+            if incoming and incoming not in current:
+                setattr(canonical, field, f"{current}\n\n{incoming}" if current else incoming)
+
+        canonical.metadata = ApplicationService._merge_metadata(
+            canonical.metadata, duplicate.metadata
         )
+        for evidence_id in duplicate.evidence_ids:
+            if evidence_id not in canonical.evidence_ids:
+                canonical.evidence_ids.append(evidence_id)
+
+    @staticmethod
+    def _merge_metadata(left, right):
+        merged = deepcopy(left) if isinstance(left, dict) else {}
+        if not isinstance(right, dict):
+            return merged
+        for key, incoming in right.items():
+            if key not in merged:
+                merged[key] = deepcopy(incoming)
+                continue
+            current = merged[key]
+            if isinstance(current, dict) and isinstance(incoming, dict):
+                merged[key] = ApplicationService._merge_metadata(current, incoming)
+            elif isinstance(current, list):
+                values = current
+                candidates = incoming if isinstance(incoming, list) else [incoming]
+                for value in candidates:
+                    if value not in values:
+                        values.append(deepcopy(value))
+            elif current != incoming:
+                merged[key] = [current, deepcopy(incoming)]
+        return merged
 
     def _deduplicate_findings(
         self,
@@ -742,7 +804,8 @@ class ApplicationService:
             if key in seen:
                 result.statistics.duplicates += 1
                 canonical = seen[key]
-                for evidence_id in finding.evidence_ids:
+                self._merge_duplicate_finding(canonical, finding)
+                for evidence_id in canonical.evidence_ids:
                     evidence = self.evidence_service.store.get(evidence_id)
                     if evidence is not None:
                         self.evidence_service.store.associate(evidence_id, canonical)

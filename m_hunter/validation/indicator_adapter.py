@@ -30,6 +30,14 @@ class LegacyIndicatorValidator:
     def validate_many(self, analysis: AnalysisResult, context) -> list[AnalysisValidation]:
         indicators = getattr(analysis.data, "indicators", ()) or ()
         decisions = []
+        indicator_names = {
+            getattr(getattr(indicator, "type", None), "name",
+                    str(getattr(indicator, "type", None)))
+            for indicator in indicators
+        }
+        duplicate_indicators = getattr(
+            self.finding_catalog, "DUPLICATE_INDICATORS", {}
+        )
         target = context.target
         if isinstance(target, Target):
             target = target.url
@@ -37,6 +45,11 @@ class LegacyIndicatorValidator:
         for indicator in indicators:
             kind = getattr(indicator, "type", None)
             name = getattr(kind, "name", str(kind))
+            if any(
+                required in indicator_names
+                for required in duplicate_indicators.get(name, ())
+            ):
+                continue
             policy = self.validator.validate(name)
             if not getattr(policy, "requires_response_change", False):
                 continue

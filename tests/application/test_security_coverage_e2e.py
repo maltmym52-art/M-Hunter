@@ -97,6 +97,57 @@ def test_passive_security_headers_flow_reaches_report():
     assert any("Legacy X-XSS-Protection" in item["title"] for item in report.findings)
 
 
+def test_missing_x_content_type_options_is_one_finding_across_scanner_and_analyzer():
+    from m_hunter.scanners.registry import ScannerRegistry
+    from m_hunter.scanners.security_headers import SecurityHeadersScanner
+
+    target = "http://127.0.0.1:8765/"
+    scanners = ScannerRegistry()
+    scanners.register(SecurityHeadersScanner())
+    service = ApplicationService(
+        http_engine=FakeHTTP(headers={}), scanner_registry=scanners,
+        analyzer_registry=registry(SecurityHeadersBaselineAnalyzer()),
+    )
+    try:
+        result = service.run(ScanRequest(
+            target, active=True, authorization=AuthorizationGrant(True, "local-qa"),
+        ))
+        related = [
+            finding for finding in result.findings
+            if "content-type-options" in finding.title.casefold()
+            or "mime sniffing" in finding.title.casefold()
+        ]
+        assert len(related) == 1
+        assert related[0].title == "Missing X-Content-Type-Options Header"
+        assert related[0].evidence_ids
+        assert result.statistics.duplicates == 1
+    finally:
+        service.close()
+
+
+def test_invalid_x_content_type_options_becomes_evidenced_finding():
+    target = "http://127.0.0.1:8765/"
+    service = ApplicationService(
+        analyzer_registry=registry(SecurityHeadersBaselineAnalyzer()),
+    )
+    try:
+        result = service.run(ScanRequest(
+            target, run_scanners=False,
+            supplied_responses={target: response(
+                target, headers={"X-Content-Type-Options": "invalid"},
+            )},
+        ))
+        finding = next(
+            item for item in result.findings
+            if item.title == "MIME Sniffing Protection Missing"
+        )
+        assert finding.evidence == "invalid"
+        assert finding.evidence_ids
+        assert service.evidence_service.store.for_finding(finding)
+    finally:
+        service.close()
+
+
 def test_cookie_response_flows_through_validation_and_redacted_evidence():
     service = ApplicationService(analyzer_registry=registry(HttpCookieSecurityAnalyzer()))
     result = service.run(ScanRequest(

@@ -94,11 +94,20 @@ class SecurityHeadersBaselineAnalyzer:
                         x_content_type_options,
                     )
                 )
+            else:
+                indicators.append(
+                    SecurityHeaderIndicator(
+                        SecurityHeaderIndicatorType.NOSNIFF_MISSING,
+                        "X-Content-Type-Options does not use nosniff",
+                        x_content_type_options,
+                    )
+                )
         else:
             indicators.append(
                 SecurityHeaderIndicator(
                     SecurityHeaderIndicatorType.X_CONTENT_TYPE_OPTIONS_MISSING,
                     "X-Content-Type-Options header is missing",
+                    "X-Content-Type-Options: <missing>",
                 )
             )
             indicators.append(

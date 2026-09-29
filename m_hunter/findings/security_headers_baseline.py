@@ -6,6 +6,12 @@ from m_hunter.core.finding import Finding
 class SecurityHeadersBaselineFinding:
     """Build Finding objects from security-header baseline indicators."""
 
+    DUPLICATE_INDICATORS = {
+        # Both indicators describe one absent header and one missing browser
+        # protection. Keep the richer header-specific Finding as canonical.
+        "NOSNIFF_MISSING": ("X_CONTENT_TYPE_OPTIONS_MISSING",),
+    }
+
     METADATA = {
         "X_CONTENT_TYPE_OPTIONS_MISSING": {
             "title": "X-Content-Type-Options Header Missing",
@@ -144,8 +150,18 @@ class SecurityHeadersBaselineFinding:
     ) -> list[Finding]:
         findings: list[Finding] = []
 
+        indicator_types = {
+            getattr(item.type, "name", item.type)
+            for item in analysis.indicators
+        }
         for indicator in analysis.indicators:
             indicator_type = getattr(indicator.type, "name", indicator.type)
+
+            if any(
+                required in indicator_types
+                for required in cls.DUPLICATE_INDICATORS.get(indicator_type, ())
+            ):
+                continue
 
             if indicator_type not in cls.METADATA:
                 continue

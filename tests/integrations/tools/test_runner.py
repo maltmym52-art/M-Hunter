@@ -1,4 +1,6 @@
+import os
 import sys
+import subprocess
 import time
 
 import pytest
@@ -7,6 +9,7 @@ from m_hunter.integrations.tools.runner import (
     ToolResult,
     ToolRunner,
 )
+import m_hunter.integrations.tools.runner as runner_module
 
 
 def test_tool_result_success():
@@ -356,3 +359,88 @@ def test_timeout_terminates_child_holding_output_pipe():
     assert result.return_code is None
     assert "before-child-timeout" in result.stdout
     assert result.duration < 5
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows Job Object cleanup")
+def test_windows_timeout_terminates_child_holding_output_pipe():
+    runner = ToolRunner(default_timeout=0.4)
+    result = runner.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess,sys,time; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(3)']); "
+                "print(child.pid, flush=True); time.sleep(3)"
+            ),
+        ],
+        timeout=0.4,
+    )
+
+    assert result.timed_out is True
+    assert result.return_code is None
+    assert result.stdout.strip()
+    assert result.duration < 2
+    child_pid = result.stdout.strip().splitlines()[0]
+    listing = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {child_pid}", "/FO", "CSV"],
+        capture_output=True, text=True, timeout=5,
+    )
+    assert f'"{child_pid}"' not in listing.stdout
+
+
+def test_windows_job_assignment_failure_closes_job_and_resumes_for_fallback(monkeypatch):
+    events = []
+
+    class SuspendedProcess:
+        pid = 12345
+
+        def kill(self):
+            events.append("kill")
+
+        def wait(self, timeout=None):
+            events.append("wait")
+
+    monkeypatch.setattr(
+        runner_module, "_assign_windows_process_to_job",
+        lambda _job, _pid: (_ for _ in ()).throw(OSError("assignment failed")),
+    )
+    monkeypatch.setattr(
+        runner_module, "_resume_windows_process", lambda _process: events.append("resume"),
+    )
+    monkeypatch.setattr(
+        runner_module, "_close_windows_job", lambda _job: events.append("close-job"),
+    )
+
+    job = runner_module._prepare_windows_process(SuspendedProcess(), 77)
+
+    assert job is None
+    assert events == ["close-job", "resume"]
+
+
+def test_windows_resume_failure_kills_process_waits_and_closes_job(monkeypatch):
+    events = []
+
+    class SuspendedProcess:
+        pid = 12345
+
+        def kill(self):
+            events.append("kill")
+
+        def wait(self, timeout=None):
+            events.append("wait")
+
+    monkeypatch.setattr(runner_module, "_assign_windows_process_to_job", lambda _job, _pid: True)
+    monkeypatch.setattr(
+        runner_module, "_resume_windows_process",
+        lambda _process: (_ for _ in ()).throw(OSError("resume failed")),
+    )
+    monkeypatch.setattr(
+        runner_module, "_close_windows_job", lambda _job: events.append("close-job"),
+    )
+
+    with pytest.raises(OSError, match="resume failed"):
+        runner_module._prepare_windows_process(SuspendedProcess(), 77)
+
+    assert events == ["kill", "wait", "close-job"]

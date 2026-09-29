@@ -62,10 +62,19 @@ class SecurityHeadersScanner(BaseScanner):
                         severity=info["severity"],
                         confidence="High",
                         target=target.url,
-                        endpoint=target.base_url,
+                        endpoint=response.url,
                         description=info["description"],
-                        evidence=f"HTTP {response.status_code} response is missing: {header_name}",
+                        evidence=(
+                            "X-Content-Type-Options: <missing>"
+                            if header_name == "x-content-type-options"
+                            else f"HTTP {response.status_code} response is missing: {header_name}"
+                        ),
                         remediation=info["remediation"],
+                        cwe=(
+                            "CWE-693"
+                            if header_name == "x-content-type-options"
+                            else None
+                        ),
                     )
                 )
 

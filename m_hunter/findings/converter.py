@@ -7,6 +7,7 @@ from typing import Any
 from m_hunter.analyzers.context import AnalysisContext
 from m_hunter.analyzers.result import AnalysisResult
 from m_hunter.core.finding import Finding
+from m_hunter.findings.identity import finding_deduplication_key
 from m_hunter.evidence.redaction import EvidenceRedactor
 from m_hunter.validation.analysis import (
     AnalysisDisposition,
@@ -162,6 +163,7 @@ class FindingConverter:
         if key in self._seen:
             return FindingProcessingResult(
                 FindingProcessingStatus.DUPLICATE,
+                finding=finding,
                 errors=("duplicate finding",),
             )
 
@@ -186,10 +188,4 @@ class FindingConverter:
 
     @staticmethod
     def _deduplication_key(finding: Finding) -> tuple[Any, ...]:
-        return (
-            finding.title.casefold(),
-            finding.target.casefold(),
-            (finding.endpoint or "").casefold(),
-            (finding.parameter or "").casefold(),
-            finding.evidence,
-        )
+        return finding_deduplication_key(finding)

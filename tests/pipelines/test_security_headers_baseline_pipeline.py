@@ -23,12 +23,12 @@ def test_pipeline_generates_findings():
         endpoint="/",
     )
 
-    assert len(findings) == 6
+    assert len(findings) == 5
 
     titles = {finding.title for finding in findings}
 
     assert "X-Content-Type-Options Header Missing" in titles
-    assert "MIME Sniffing Protection Missing" in titles
+    assert "MIME Sniffing Protection Missing" not in titles
     assert "Legacy X-XSS-Protection Configuration" in titles
     assert "Broad Cross-Domain Policy" in titles
     assert "Clear-Site-Data Wildcard Usage" in titles
@@ -69,7 +69,7 @@ def test_pipeline_handles_all_security_indicators():
         endpoint="/security",
     )
 
-    assert len(findings) == 6
+    assert len(findings) == 5
 
     severities = {finding.severity for finding in findings}
 

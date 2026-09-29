@@ -60,7 +60,6 @@ class EvidenceService:
         context = AnalysisContext(
             request_url=finding.endpoint,
             target=finding.target,
-            metadata={"finding_id": finding.id},
         )
         return self.record(
             context,
