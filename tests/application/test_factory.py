@@ -48,6 +48,7 @@ def test_factory_registers_runnable_http_response_security_analyzer():
     from m_hunter.core.response import HttpResponse
 
     target = "http://127.0.0.1:8765/"
+    body = b"Upstream service 10.20.30.40"
     service = create_default_application_service()
     assert "http_response_security" in service.analyzer_registry.names()
 
@@ -58,10 +59,10 @@ def test_factory_registers_runnable_http_response_security_analyzer():
             status_code=200,
             url=target,
             headers={"Server": "nginx/1.25.3"},
-            content=b"",
+            content=body,
             cookies={},
             response_time=0.01,
-            content_length=0,
+            content_length=len(body),
         )},
     ))
 
@@ -69,3 +70,8 @@ def test_factory_registers_runnable_http_response_security_analyzer():
                    if item.title == "Server Version Disclosure")
     assert finding.evidence == "nginx/1.25.3"
     assert finding.evidence_ids
+    assert any(
+        item.title == "Internal IP Address Disclosure"
+        and item.evidence == "10.20.30.40"
+        for item in result.findings
+    )

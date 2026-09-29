@@ -127,6 +127,40 @@ def test_internal_ip():
     )
 
 
+def test_internal_ip_is_detected_from_response_text_with_exact_value():
+    result = HttpResponseSecurityAnalyzer().analyze(
+        body="Upstream service responded from 10.20.30.40",
+    )
+
+    indicators = [
+        item for item in result.indicators
+        if item.type == HttpResponseSecurityIndicatorType.INTERNAL_IP_DISCLOSURE
+    ]
+    assert [item.value for item in indicators] == ["10.20.30.40"]
+
+
+def test_internal_ip_detection_ignores_public_or_malformed_addresses():
+    result = HttpResponseSecurityAnalyzer().analyze(
+        body="Resolver 8.8.8.8; malformed 999.999.999.999",
+    )
+
+    assert not result.has_type(
+        HttpResponseSecurityIndicatorType.INTERNAL_IP_DISCLOSURE
+    )
+
+
+def test_internal_ip_detection_supports_private_ipv6_and_deduplicates():
+    result = HttpResponseSecurityAnalyzer().analyze(
+        body="Node fd12:3456::1 repeated fd12:3456::1",
+    )
+
+    indicators = [
+        item for item in result.indicators
+        if item.type == HttpResponseSecurityIndicatorType.INTERNAL_IP_DISCLOSURE
+    ]
+    assert [item.value for item in indicators] == ["fd12:3456::1"]
+
+
 def test_directory_listing_flag():
     result = HttpResponseSecurityAnalyzer().analyze(
         directory_listing=True,

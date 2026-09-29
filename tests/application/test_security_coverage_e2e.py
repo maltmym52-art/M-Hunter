@@ -203,6 +203,81 @@ def test_semantically_identical_server_observations_are_deduplicated():
     assert matches[0].evidence == "nginx/1.25.3"
 
 
+def test_internal_ip_disclosure_flows_passively_through_reports():
+    from m_hunter.application.factory import create_default_application_service
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    http_spy = FakeHTTP()
+    service.http_engine = http_spy
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={
+            target: response(target, body=b"Upstream at 10.20.30.40")
+        },
+    ))
+
+    assert http_spy.calls == []
+    finding = next(
+        item for item in result.findings
+        if item.title == "Internal IP Address Disclosure"
+    )
+    assert finding.severity == "Low"
+    assert finding.confidence == "Medium"
+    assert finding.evidence == "10.20.30.40"
+    assert finding_semantic_identity(finding) == (
+        "semantic", "internal_ip_disclosure"
+    )
+    evidence = service.evidence_service.store.for_finding(finding)
+    assert len(evidence) == 1
+    assert evidence[0].sanitized.evidence == "10.20.30.40"
+
+    reports = ReportService()
+    model = reports.build(result, service.evidence_service)
+    for format_name in ("json", "markdown", "html"):
+        rendered = reports.render(model, format_name)
+        assert "Internal IP Address Disclosure" in rendered
+        assert "10.20.30.40" in rendered
+
+
+def test_internal_ip_findings_deduplicate_by_exact_observation():
+    from m_hunter.application.factory import create_default_application_service
+    from m_hunter.analyzers.http_response_security import HttpResponseSecurityAnalyzer
+
+    target = "http://127.0.0.1:8765/"
+    service = create_default_application_service()
+    duplicate_name = "http_response_security_repeat"
+    service.analyzer_registry.register_legacy(
+        HttpResponseSecurityAnalyzer(), name=duplicate_name
+    )
+    service.validators[duplicate_name] = service.validators["http_response_security"]
+
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={
+            target: response(target, body=b"Upstream at 10.20.30.40")
+        },
+    ))
+    findings = [item for item in result.findings
+                if item.title == "Internal IP Address Disclosure"]
+    assert len(findings) == 1
+    assert result.statistics.duplicates == 1
+
+    different = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={
+            target: response(target, body=b"Upstream at 10.20.30.41")
+        },
+    ))
+    distinct = [item for item in different.findings
+                if item.title == "Internal IP Address Disclosure"]
+    assert len(distinct) == 1
+    assert distinct[0].evidence == "10.20.30.41"
+
+
 def test_missing_x_content_type_options_is_one_finding_across_scanner_and_analyzer():
     from m_hunter.scanners.registry import ScannerRegistry
     from m_hunter.scanners.security_headers import SecurityHeadersScanner

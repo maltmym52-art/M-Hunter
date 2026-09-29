@@ -2,6 +2,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import ipaddress
+import re
+
+
+_IPV4_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+_IPV6_PATTERN = re.compile(
+    r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])"
+)
+_INTERNAL_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "fc00::/7",
+        "fe80::/10",
+        "::1/128",
+    )
+)
 
 
 class HttpResponseSecurityIndicatorType(str, Enum):
@@ -150,6 +171,7 @@ class HttpResponseSecurityAnalyzer:
 
         content = body or ""
         lowered = content.lower()
+        internal_addresses = self._internal_ip_addresses(content)
 
         if debug or any(marker in lowered for marker in self.DEBUG_MARKERS):
             indicators.append(
@@ -191,12 +213,21 @@ class HttpResponseSecurityAnalyzer:
                 )
             )
 
-        if internal_ip:
+        if internal_ip and not internal_addresses:
             indicators.append(
                 HttpResponseSecurityIndicator(
                     HttpResponseSecurityIndicatorType.INTERNAL_IP_DISCLOSURE,
                     "Internal IP address information is exposed",
                     body,
+                )
+            )
+
+        for address in internal_addresses:
+            indicators.append(
+                HttpResponseSecurityIndicator(
+                    HttpResponseSecurityIndicatorType.INTERNAL_IP_DISCLOSURE,
+                    "Internal IP address information is exposed",
+                    address,
                 )
             )
 
@@ -230,3 +261,26 @@ class HttpResponseSecurityAnalyzer:
             )
 
         return HttpResponseSecurityAnalysis(tuple(indicators))
+
+    @staticmethod
+    def _internal_ip_addresses(content: str) -> tuple[str, ...]:
+        """Return distinct private/local IP literals observed in response text."""
+        addresses: list[str] = []
+        seen: set[str] = set()
+        for pattern in (_IPV4_PATTERN, _IPV6_PATTERN):
+            for match in pattern.finditer(content):
+                value = match.group(0)
+                try:
+                    address = ipaddress.ip_address(value)
+                except ValueError:
+                    continue
+                if not any(
+                    address.version == network.version and address in network
+                    for network in _INTERNAL_NETWORKS
+                ):
+                    continue
+                normalized = str(address)
+                if normalized not in seen:
+                    seen.add(normalized)
+                    addresses.append(value)
+        return tuple(addresses)
