@@ -817,7 +817,7 @@ class ApplicationService:
     ) -> ScanExecutionResult:
         result.state = state
         result.scan.status = state.value
-        result.scan.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        result.scan.finished_at = datetime.now(timezone.utc)
         result.statistics.findings = len(result.findings)
         result.statistics.evidence_records = len(result.evidence_ids) or sum(
             len(item.evidence_ids) for item in result.findings

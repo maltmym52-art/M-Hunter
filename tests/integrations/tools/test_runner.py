@@ -326,3 +326,33 @@ def test_duration_is_recorded():
 
     assert result.duration >= 0
     assert result.duration <= elapsed + 1
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("os"), "setsid"),
+    reason="requires POSIX process groups",
+)
+def test_timeout_terminates_child_holding_output_pipe():
+    runner = ToolRunner(default_timeout=0.5)
+
+    result = runner.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess,sys,time; "
+                "child=subprocess.Popen(["
+                "sys.executable,'-c',"
+                "'import time; time.sleep(30)'"
+                "]); "
+                "print('before-child-timeout', flush=True); "
+                "time.sleep(30)"
+            ),
+        ],
+        timeout=0.5,
+    )
+
+    assert result.timed_out is True
+    assert result.return_code is None
+    assert "before-child-timeout" in result.stdout
+    assert result.duration < 5

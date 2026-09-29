@@ -29,6 +29,7 @@ def default_scanner_registry() -> ScannerRegistry:
 
 def create_default_application_service(
     *, timeout: float = 10.0,
+      external_tool_timeout: float = 45.0,
     scope_manager: ScopeManager | None = None,
     external_tools: bool = False,
     tool_runner: ToolRunner | None = None,
@@ -36,7 +37,7 @@ def create_default_application_service(
     wordlist: Path | None = None,
 ) -> ApplicationService:
     """Compose the same optional integrations and analyzers for any UI client."""
-    runner = tool_runner or ToolRunner(default_timeout=timeout)
+    runner = tool_runner or ToolRunner(default_timeout=external_tool_timeout)
     selected = recon_source_names
     if selected is None and external_tools:
         selected = ("subfinder", "amass")
@@ -44,12 +45,12 @@ def create_default_application_service(
     if selected:
         from m_hunter.integrations.tools.subfinder import SubfinderSource
         constructors = {
-            "subfinder": lambda: SubfinderSource(runner=runner, timeout=timeout),
-            "amass": lambda: AmassSource(runner, timeout=timeout),
-            "httpx": lambda: HttpxSource(runner, timeout=timeout),
-            "nmap": lambda: NmapSource(runner, timeout=timeout),
-            "ffuf": lambda: FfufSource(runner, timeout=timeout, wordlist=wordlist),
-            "nuclei": lambda: NucleiSource(runner, timeout=timeout),
+            "subfinder": lambda: SubfinderSource(runner=runner, timeout=external_tool_timeout),
+            "amass": lambda: AmassSource(runner, timeout=external_tool_timeout),
+            "httpx": lambda: HttpxSource(runner, timeout=external_tool_timeout),
+            "nmap": lambda: NmapSource(runner, timeout=external_tool_timeout),
+            "ffuf": lambda: FfufSource(runner, timeout=external_tool_timeout, wordlist=wordlist),
+            "nuclei": lambda: NucleiSource(runner, timeout=external_tool_timeout),
         }
         unknown = set(selected) - constructors.keys()
         if unknown:

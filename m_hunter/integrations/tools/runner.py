@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import os
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -79,14 +81,26 @@ class ToolRunner:
 
         start = time.perf_counter()
 
+        popen_kwargs = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": False,
+            "cwd": cwd,
+            "env": env,
+            "shell": False,
+        }
+
+        # External security tools may spawn child processes that inherit
+        # stdout/stderr. Keep the whole process tree in a dedicated group
+        # so a timeout can terminate the complete group and close pipes.
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+        elif os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
         process = subprocess.Popen(
             normalized_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=False,
-            cwd=cwd,
-            env=env,
-            shell=False,
+            **popen_kwargs,
         )
 
         timed_out = False
@@ -99,7 +113,20 @@ class ToolRunner:
         except subprocess.TimeoutExpired as exc:
             timed_out = True
 
-            process.kill()
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            elif os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                process.kill()
 
             remaining_stdout, remaining_stderr = process.communicate()
 

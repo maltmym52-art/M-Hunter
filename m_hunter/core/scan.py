@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, timezone
 from uuid import uuid4
 
 from m_hunter.core.target import Target
@@ -15,8 +15,8 @@ class Scan:
 
     def start(self) -> None:
         self.status = "running"
-        self.started_at = datetime.now()
+        self.started_at = datetime.now(timezone.utc)
 
     def finish(self) -> None:
         self.status = "completed"
-        self.finished_at = datetime.now()
+        self.finished_at = datetime.now(timezone.utc)

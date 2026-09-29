@@ -18,6 +18,11 @@ class HttpSettings:
 @dataclass
 class ScanSettings:
     auto_discover_scanners: bool = True
+    external_tool_timeout: float = 45.0
+
+    def __post_init__(self):
+        if self.external_tool_timeout <= 0:
+            raise ValueError("external_tool_timeout must be greater than 0")
 
 
 @dataclass
