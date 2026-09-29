@@ -1,6 +1,6 @@
 """GUI/controller security and shared-service contract tests."""
 
-from threading import Event
+from threading import Event, get_ident
 
 from typer.testing import CliRunner
 
@@ -16,7 +16,7 @@ from m_hunter.core.scan import Scan
 from m_hunter.core.target import Target
 from m_hunter.evidence.service import EvidenceService
 from m_hunter.gui.controller import GUIController
-from m_hunter.gui.app import GUIUnavailableError, launch
+from m_hunter.gui.app import GUI_RECON_SOURCES, GUIUnavailableError, launch
 from m_hunter.reporting.service import ReportService
 
 
@@ -161,6 +161,37 @@ def test_cancellation_is_cooperative_and_keeps_result_state_consistent():
     result = future.result(timeout=2)
     assert result.state == ScanState.CANCELLED
     assert controller.last_result is result
+    controller.close()
+
+
+def test_gui_external_recon_choices_are_registered_by_the_shared_factory():
+    service = create_default_application_service(
+        external_tools=True, recon_source_names=GUI_RECON_SOURCES,
+    )
+    try:
+        names = tuple(source.name for source in service.recon_pipeline.discovery.get_sources())
+        assert names == GUI_RECON_SOURCES
+    finally:
+        service.close()
+
+
+def test_async_scan_runs_outside_the_calling_gui_thread():
+    caller_thread = get_ident()
+    scan_thread = []
+
+    class ThreadRecordingService:
+        evidence_service = EvidenceService()
+
+        def run(self, request):
+            scan_thread.append(get_ident())
+            result = ScanExecutionResult(Scan(Target(request.target)), state=ScanState.COMPLETED)
+            result.scan.status = "completed"
+            return result
+
+    controller = GUIController(ThreadRecordingService())  # type: ignore[arg-type]
+    result = controller.start_scan(ScanRequest(TARGET)).result(timeout=2)
+    assert result.state == ScanState.COMPLETED
+    assert scan_thread and scan_thread[0] != caller_thread
     controller.close()
 
 

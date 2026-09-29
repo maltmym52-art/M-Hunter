@@ -42,8 +42,14 @@ def test_root_banner_and_help():
     assert "M-Hunter" in result.stdout
     help_result = runner.invoke(app, ["--help"], obj=ctx())
     assert help_result.exit_code == 0
-    for command in ("scan", "recon", "analyze", "report", "tools"):
+    for command in ("scan", "recon", "analyze", "report", "tools", "gui"):
         assert command in help_result.stdout
+
+
+def test_gui_command_help_does_not_require_qt():
+    result = runner.invoke(app, ["gui", "--help"], obj=ctx())
+    assert result.exit_code == 0
+    assert "PySide6" in result.stdout
 
 
 @pytest.mark.parametrize("args,expected", [

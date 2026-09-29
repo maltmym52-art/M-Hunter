@@ -8,6 +8,7 @@ import pytest
 from m_hunter.application.models import AuthorizationGrant, ScanRequest, ScanState
 from m_hunter.application.scope import ScopeViolation
 from m_hunter.application.service import ApplicationService
+from m_hunter.core.response import HttpResponse
 from m_hunter.integrations.tools.catalog import ToolCatalog
 from m_hunter.integrations.tools.recon_sources import (
     AmassSource,
@@ -122,6 +123,37 @@ def test_ffuf_requires_existing_operator_wordlist_and_redacts_path(tmp_path):
     assert assets[0].value == "https://example.test/admin"
     assert str(wordlist) not in json.dumps(source.last_command)
     assert "<WORDLIST>" in source.last_command
+
+
+def test_application_request_supplies_ffuf_wordlist_through_scoped_execution(tmp_path):
+    wordlist = tmp_path / "gui-words.txt"
+    wordlist.write_text("admin\n", encoding="utf-8")
+    runner = FakeRunner({
+        "ffuf": json.dumps({"results": [
+            {"url": "https://example.test/admin", "status": 200, "length": 10},
+        ]}),
+    })
+    class LocalHttp:
+        def request(self, method, url, **_kwargs):
+            return HttpResponse(200, url, {"Content-Type": "text/plain"}, b"fixture", {}, 0.01, 7)
+
+    service = ApplicationService(
+        http_engine=LocalHttp(), tool_runner=runner,
+        recon_sources=[FfufSource(runner)], scope_manager=scope(),
+    )
+    try:
+        result = service.run(ScanRequest(
+            "https://example.test/", active=True, recon=True,
+            authorization=AuthorizationGrant(True, "unit-test-authorization"),
+            run_scanners=False, run_analyzers=False,
+            recon_source_names=("ffuf",), recon_wordlist=wordlist,
+        ))
+        assert result.state == ScanState.COMPLETED, result.issues
+        assert any(asset.value == "https://example.test/admin" for asset in result.assets)
+        command = runner.calls[0][0]
+        assert str(wordlist.resolve()) in command
+    finally:
+        service.close()
 
 
 def test_ffuf_missing_wordlist_is_a_clear_configuration_error():

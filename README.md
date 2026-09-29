@@ -80,8 +80,16 @@ The package uses Typer, Rich, and HTTPX. Desktop dependencies are optional:
 
 ```bash
 python -m pip install '.[gui]'
-m-hunter-gui
+m-hunter gui
 ```
+
+The GUI is a presentation client for the same `ApplicationService` used by the
+CLI. Passive mode is the default; active scans require an authorization
+reference and remain subject to the configured scope. The GUI includes scan
+progress, findings, evidence, assets, tool availability, reports, and the
+optional AI analyst panel. The AI panel is advisory and only available when an
+AI provider is explicitly configured. `m-hunter-gui` remains available as a
+standalone launcher.
 
 The GUI requires a desktop environment to display its window. Its controller
 and architecture tests are headless and do not require PySide6 or a display

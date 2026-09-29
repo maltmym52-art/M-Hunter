@@ -354,6 +354,10 @@ class ApplicationService:
                 try:
                     if hasattr(source, "runner"):
                         source.runner = guarded_tools
+                    source_options = {}
+                    if (request.recon_wordlist is not None
+                            and getattr(source, "name", "").casefold() == "ffuf"):
+                        source_options["wordlist"] = request.recon_wordlist
                     discovered.extend(
                         source.discover_scoped(
                             target_url,
@@ -362,6 +366,7 @@ class ApplicationService:
                             active_enabled=request.active,
                             http_engine=guarded_http,
                             tool_runner=guarded_tools,
+                            **source_options,
                         )
                     )
                     self._record_source_status(source, result, target_url)

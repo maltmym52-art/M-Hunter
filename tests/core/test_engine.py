@@ -288,16 +288,28 @@ def test_custom_registry_is_not_auto_discovered():
     assert engine.registry.count() == 0
 
 
-def test_auto_discovered_scanners_can_run():
+def test_auto_discovered_scanners_can_run(monkeypatch):
     engine = ScanEngine()
 
-    scan = engine.create_scan("https://example.com")
+    # Keep this registry integration check entirely local: the discovered
+    # scanners normally make HTTP requests, which this unit test need not do.
+    for index, scanner in enumerate(engine.registry.get_all()):
+        monkeypatch.setattr(
+            scanner,
+            "run",
+            lambda target, index=index: [Finding(
+                title=f"Local finding {index}", severity="Low", confidence="High",
+                target=target.url,
+            )],
+        )
+
+    scan = engine.create_scan("https://authorized.example.test")
 
     findings = engine.run_registered_scanners(scan)
 
     assert findings
     assert any(
-        finding.target == "https://example.com"
+        finding.target == "https://authorized.example.test"
         for finding in findings
     )
 

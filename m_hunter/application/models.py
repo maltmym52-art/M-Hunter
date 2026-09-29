@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from enum import Enum
 from threading import Event
 from typing import Any, Mapping
@@ -66,6 +67,7 @@ class ScanRequest:
     scanner_names: tuple[str, ...] | None = None
     analyzer_names: tuple[str, ...] | None = None
     recon_source_names: tuple[str, ...] | None = None
+    recon_wordlist: Path | None = None
     analyzer_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     include_example_scanner: bool = False
     supplied_responses: Mapping[str, HttpResponse] = field(default_factory=dict)
@@ -91,6 +93,8 @@ class ScanRequest:
             if any(not name for name in names):
                 raise ValueError("recon source names must not be empty")
             self.recon_source_names = tuple(dict.fromkeys(names))
+        if self.recon_wordlist is not None:
+            self.recon_wordlist = Path(self.recon_wordlist).expanduser()
 
 
 @dataclass(frozen=True)

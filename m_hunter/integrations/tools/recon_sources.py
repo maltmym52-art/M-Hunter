@@ -69,7 +69,7 @@ class ExternalReconSource(DiscoverySource):
         scope_manager: ScopeManager,
         authorization: AuthorizationGrant,
         active_enabled: bool = False,
-        **_dependencies: Any,
+        **dependencies: Any,
     ) -> list[Asset]:
         """Check authorization and exact scope before building/running argv."""
         if not is_in_scope(scope_manager, target):
@@ -79,7 +79,8 @@ class ExternalReconSource(DiscoverySource):
                 raise ScopeViolation(f"{self.name} requires explicit active mode")
             if not authorization.authorized:
                 raise ScopeViolation(f"{self.name} requires explicit authorization")
-        assets = self._execute(self._host(target), target)
+        wordlist = dependencies.get("wordlist") if self.name == "ffuf" else None
+        assets = self._execute(self._host(target), target, wordlist=wordlist)
         accepted: list[Asset] = []
         for asset in assets:
             asset_url = asset.value if asset.value.startswith(("http://", "https://")) else f"{urlparse(target).scheme or 'https'}://{asset.value}"
@@ -87,12 +88,15 @@ class ExternalReconSource(DiscoverySource):
                 accepted.append(asset)
         return accepted
 
-    def _execute(self, host: str, original_target: str) -> list[Asset]:
+    def _execute(self, host: str, original_target: str, *, wordlist: Path | None = None) -> list[Asset]:
         status = ToolCatalog(self.runner).detect(self.binary, include_version=False)
         if not status.installed:
             self.last_status = "missing"
             return []
-        arguments = self.arguments(host, original_target)
+        if self.name == "ffuf" and wordlist is not None:
+            arguments = self.arguments(host, original_target, wordlist=wordlist)
+        else:
+            arguments = self.arguments(host, original_target)
         command = (status.executable or self.binary, *map(str, arguments))
         self.last_command = tuple(self._safe_command((self.binary, *map(str, arguments))))
         self.last_run_at = datetime.now(timezone.utc).isoformat()
@@ -240,12 +244,13 @@ class FfufSource(ExternalReconSource):
         super().__init__(runner, timeout=timeout)
         self.wordlist = Path(wordlist).expanduser().resolve() if wordlist else None
 
-    def arguments(self, host: str, target: str) -> list[str]:
-        if self.wordlist is None or not self.wordlist.is_file():
+    def arguments(self, host: str, target: str, *, wordlist: Path | None = None) -> list[str]:
+        selected_wordlist = Path(wordlist).expanduser().resolve() if wordlist else self.wordlist
+        if selected_wordlist is None or not selected_wordlist.is_file():
             raise ValueError("ffuf requires an existing --wordlist file")
         parsed = urlparse(target)
         base = target.rstrip("/") + "/FUZZ"
-        return ["-u", base, "-w", str(self.wordlist), "-mc", "all", "-json",
+        return ["-u", base, "-w", str(selected_wordlist), "-mc", "all", "-json",
                 "-rate", "10", "-t", "5", "-noninteractive",
                 "-timeout", str(max(1, int(self.timeout)))]
 

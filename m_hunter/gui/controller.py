@@ -40,6 +40,7 @@ class GUIController:
         self.redactor = EvidenceRedactor()
         self._progress_event = None
         self._tool_status: tuple[dict[str, Any], ...] | None = None
+        self._tool_status_future = None
         event_bus = getattr(application_service, "event_bus", None)
         self._unsubscribe = (
             event_bus.subscribe(self._on_event)
@@ -96,6 +97,10 @@ class GUIController:
         )
         return self.report_service.render(model, format)
 
+    def start_report(self, format: str = "json") -> Future[str]:
+        """Render on the presentation executor so large reports never block Qt."""
+        return self._executor.submit(self.report, format)
+
     def analyze_last_scan(self) -> AIAnalysisResult:
         """Request optional advisory analysis, never part of scan execution."""
         if self.last_result is None:
@@ -113,12 +118,16 @@ class GUIController:
                 self.ai_result = AIAnalysisResult("failed", error=self.redactor.redact_text(str(exc)))
         return self.ai_result
 
-    def view_data(self) -> dict[str, Any]:
+    def start_ai_analysis(self) -> Future[AIAnalysisResult]:
+        """Run optional provider work off the GUI thread."""
+        return self._executor.submit(self.analyze_last_scan)
+
+    def view_data(self, *, non_blocking_tools: bool = False) -> dict[str, Any]:
         """Return presentation-safe page data; never expose raw Evidence objects."""
         if self.last_result is None:
             return {"pages": self.PAGES, "scan": None, "findings": (), "evidence": (),
                     "progress": self._progress_data(), "ai_analysis": None,
-                    "tools": self._get_tool_status()}
+                    "tools": self._get_tool_status(non_blocking=non_blocking_tools)}
         model = self.report_service.build(
             self.last_result, self.application_service.evidence_service
         )
@@ -138,27 +147,35 @@ class GUIController:
             "statistics": payload["statistics"],
             "progress": self._progress_data(),
             "ai_analysis": self._ai_data(),
-            "tools": self._get_tool_status(),
+            "tools": self._get_tool_status(non_blocking=non_blocking_tools),
         }
 
-    def _get_tool_status(self) -> tuple[dict[str, Any], ...]:
+    def _get_tool_status(self, *, non_blocking: bool = False) -> tuple[dict[str, Any], ...]:
         if self._tool_status is None:
-            getter = getattr(self.application_service, "tools_status", None)
-            if not callable(getter):
-                self._tool_status = ({"name": "external tools", "status": "managed by ApplicationService"},)
+            if non_blocking:
+                if self._tool_status_future is None:
+                    self._tool_status_future = self._executor.submit(self._load_tool_status)
+                elif self._tool_status_future.done():
+                    self._tool_status = self._tool_status_future.result()
             else:
-                try:
-                    values = getter(include_version=True)
-                    self._tool_status = tuple({
-                        key: self.redactor.redact_text(str(value)) if value is not None else None
-                        for key, value in item.items()
-                    } for item in values)
-                except Exception as exc:
-                    self._tool_status = ({
-                        "name": "external tools", "status": "unavailable",
-                        "error": self.redactor.redact_text(str(exc)),
-                    },)
+                self._tool_status = self._load_tool_status()
+            if self._tool_status is None:
+                return ({"name": "External tools", "status": "checking"},)
         return self._tool_status
+
+    def _load_tool_status(self) -> tuple[dict[str, Any], ...]:
+        getter = getattr(self.application_service, "tools_status", None)
+        if not callable(getter):
+            return ({"name": "external tools", "status": "managed by ApplicationService"},)
+        try:
+            values = getter(include_version=True)
+            return tuple({
+                key: self.redactor.redact_text(str(value)) if value is not None else None
+                for key, value in item.items()
+            } for item in values)
+        except Exception as exc:
+            return ({"name": "external tools", "status": "unavailable",
+                     "error": self.redactor.redact_text(str(exc))},)
 
     def _ai_data(self) -> dict[str, Any] | None:
         if self.ai_result is None:

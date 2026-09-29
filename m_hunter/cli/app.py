@@ -133,6 +133,23 @@ def version(ctx: typer.Context) -> None:
     _console(ctx).print("M-Hunter 0.1.0")
 
 
+@app.command("gui")
+def gui_command() -> None:
+    """Open the optional PySide6 desktop interface."""
+    from m_hunter.gui.app import GUI_RECON_SOURCES, GUIUnavailableError, launch
+
+    service = create_default_application_service(
+        external_tools=True, recon_source_names=GUI_RECON_SOURCES,
+    )
+    try:
+        code = launch(service)
+    except GUIUnavailableError as exc:
+        service.close()
+        raise typer.BadParameter(str(exc)) from exc
+    if code:
+        raise typer.Exit(code)
+
+
 def _scope(target: str, allow_hosts: list[str], exclude_paths: list[str]) -> ScopeManager:
     url = URL(target)
     hosts = {url.host, *(host.strip().lower() for host in allow_hosts if host.strip())}
