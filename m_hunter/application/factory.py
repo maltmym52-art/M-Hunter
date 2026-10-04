@@ -6,6 +6,7 @@ from m_hunter.analyzers.cache_control_security import CacheControlSecurityAnalyz
 from m_hunter.analyzers.http_cookie_security import HttpCookieSecurityAnalyzer
 from m_hunter.analyzers.http_response_security import HttpResponseSecurityAnalyzer
 from m_hunter.analyzers.metadata import MetadataAnalyzer
+from m_hunter.analyzers.xss import XSSAnalyzer
 from m_hunter.analyzers.registry import AnalyzerRegistry
 from m_hunter.analyzers.security_headers import SecurityHeadersAnalyzer
 from m_hunter.analyzers.security_headers_baseline import SecurityHeadersBaselineAnalyzer
@@ -19,6 +20,7 @@ from m_hunter.integrations.tools.runner import ToolRunner
 from m_hunter.recon.scope import ScopeManager
 from m_hunter.scanners.registry import ScannerRegistry
 from m_hunter.scanners.security_headers import SecurityHeadersScanner
+from m_hunter.validation.xss_unified import XSSUnifiedValidator
 
 
 def default_scanner_registry() -> ScannerRegistry:
@@ -61,7 +63,7 @@ def create_default_application_service(
     for analyzer in (
         SecurityHeadersAnalyzer(), MetadataAnalyzer(), SecurityHeadersBaselineAnalyzer(),
         HttpCookieSecurityAnalyzer(), CacheControlSecurityAnalyzer(),
-        HttpResponseSecurityAnalyzer(),
+        HttpResponseSecurityAnalyzer(), XSSAnalyzer(),
     ):
         analyzers.register(analyzer)
     return ApplicationService(
@@ -71,4 +73,5 @@ def create_default_application_service(
         scanner_registry=default_scanner_registry(),
         analyzer_registry=analyzers,
         scope_manager=scope_manager,
+        validators={"xss": XSSUnifiedValidator()},
     )
