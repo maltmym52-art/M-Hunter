@@ -8,6 +8,7 @@ from m_hunter.analyzers.registry import AnalyzerRegistry
 from m_hunter.analyzers.security_headers_baseline import SecurityHeadersBaselineAnalyzer
 from m_hunter.analyzers.http_cookie_security import HttpCookieSecurityAnalyzer
 from m_hunter.analyzers.cache_control_security import CacheControlSecurityAnalyzer
+from m_hunter.analyzers.coep import COEPAnalyzer
 from m_hunter.analyzers.sqli import SQLiAnalyzer
 from m_hunter.analyzers.xss import XSSAnalyzer
 from m_hunter.analyzers.web_cache_key_security import WebCacheKeySecurityAnalyzer, WebCacheKeyIndicatorType
@@ -670,3 +671,46 @@ def test_duplicate_analyzer_signals_create_one_finding():
     ))
     assert len(result.findings) == 1
     assert result.statistics.duplicates == 1
+
+
+def test_default_coep_flow_reaches_unified_finding_pipeline():
+    from m_hunter.application.factory import create_default_application_service
+
+    target = "https://coep.example.test/"
+    supplied = response(
+        target,
+        headers={
+            "Cross-Origin-Embedder-Policy": "unsafe-none",
+        },
+    )
+
+    service = create_default_application_service()
+
+    result = service.run(ScanRequest(
+        target,
+        run_scanners=False,
+        supplied_responses={target: supplied},
+    ))
+
+    coep_analyses = [
+        analysis
+        for analysis in result.analyses
+        if analysis.analyzer_name == "coep"
+    ]
+
+    assert coep_analyses
+
+    coep_findings = [
+        item
+        for item in result.findings
+        if item.cwe == "CWE-693"
+        and item.owasp == "A05:2021"
+        and item.endpoint == target
+    ]
+
+    assert coep_findings
+    assert any(
+        "unsafe-none" in (item.evidence or "")
+        for item in coep_findings
+    )
+    assert all(item.evidence_ids for item in coep_findings)
