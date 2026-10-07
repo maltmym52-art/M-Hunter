@@ -616,6 +616,17 @@ class ApplicationService:
                                 "active analyzer requires explicit active mode and authorization",
                                 target=target_url, endpoint=endpoint)
                     continue
+                # XSS requires a caller-supplied reflection marker. When XSS is
+                # part of the default analyzer set, skip it unless a marker was
+                # explicitly configured; an explicitly requested XSS analyzer
+                # still reports the missing marker as a configuration error.
+                analyzer_options = request.analyzer_options.get(analyzer.name, {})
+                if (
+                    analyzer.name == "xss"
+                    and request.analyzer_names is None
+                    and "marker" not in analyzer_options
+                ):
+                    continue
                 if (getattr(capabilities, "requires_request", False)
                         and endpoint not in result.requests):
                     self._issue(result, analyzer.name, ScanStage.ANALYZERS,
@@ -628,7 +639,7 @@ class ApplicationService:
                     request_url=endpoint,
                     target=result.scan.target,
                     request=result.requests.get(endpoint),
-                    options=request.analyzer_options.get(analyzer.name, {}),
+                    options=analyzer_options,
                     # Do not copy arbitrary caller metadata or authorization
                     # references into Finding metadata or evidence context.
                     metadata={"scan_id": result.scan.id, "active_enabled": request.active},
